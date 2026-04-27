@@ -1018,9 +1018,8 @@
 
   <!-- Fallback: if Firebase module fails to load (file:// or no internet), run app with localStorage only -->
   <script>
-    function _initLocalMode(reason) {
-      if (window._fbLoaded) return; // Firebase already handled it
-      console.warn('Firebase no cargo — modo offline');
+    function _initLocalMode() {
+      if (window._fbLoaded) return;
       window._fbUser = { email: 'local@jma.co' };
       window._fbLoaded = true;
       document.getElementById('login-screen')?.classList.add('hidden');
@@ -1031,14 +1030,15 @@
     }
 
     if (window.location.protocol === 'file:') {
-      // file:// — Firebase modules blocked by CORS, start immediately after DOM ready
       document.addEventListener('DOMContentLoaded', function() {
-        setTimeout(function() { _initLocalMode('file://'); }, 100);
+        setTimeout(_initLocalMode, 200);
       });
     } else {
-      // Online — give Firebase plenty of time (10s) before fallback
+      // Only fallback if Firebase module never signaled ready
       window.addEventListener('load', function() {
-        setTimeout(function() { _initLocalMode('timeout'); }, 10000);
+        setTimeout(function() {
+          if (!window._firebaseReady) _initLocalMode();
+        }, 8000);
       });
     }
   </script>
@@ -1316,7 +1316,7 @@
       <div class="form-grid">
         <div class="form-group span2">
           <label>Nombre / Razón Social</label>
-          <input type="text" id="cli-nombre" placeholder="Ej: Alfagres S.A.">
+          <input type="text" id="cli-nombre" placeholder="Ej: Alfagres S.A." oninput="autoFillMpioFromCliente()">
         </div>
         <div class="form-group">
           <label>Contacto Principal</label>
@@ -1332,7 +1332,7 @@
         </div>
         <div class="form-group">
           <label>NIT / Cédula</label>
-          <input type="text" id="cli-nit" placeholder="XXXXXXXXX-X">
+          <input type="text" id="cli-nit" placeholder="XXXXXXXXX-X" oninput="autoFillMpioFromCliente()">
         </div>
         <div class="form-group">
           <label>Sucursal / Sede</label>
@@ -3432,6 +3432,19 @@ function fillCliente(idx) {
   document.getElementById('cli-suc').value = c.suc || '';
   document.getElementById('cli-nit').value = c.nit || '';
   document.getElementById('cli-mpio').value = c.mpio || '';
+}
+
+function autoFillMpioFromCliente() {
+  const nombre = document.getElementById('cli-nombre')?.value?.trim().toLowerCase();
+  const nit    = document.getElementById('cli-nit')?.value?.trim();
+  const clientes = STORE.get('jma_clientes', []);
+  // Match by NIT first (exact), then by name (contains)
+  const match = clientes.find(c => nit && c.nit === nit)
+             || clientes.find(c => nombre && nombre.length > 3 && (c.nombre||'').toLowerCase().includes(nombre));
+  if (match && match.mpio) {
+    const sel = document.getElementById('cli-mpio');
+    if (sel && !sel.value) sel.value = match.mpio;
+  }
 }
 
 // ══════════════════════════════════════════════════════
