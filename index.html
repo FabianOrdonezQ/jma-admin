@@ -4900,4 +4900,1033 @@ function renderCostoCotResults() {
            <span>🔎</span><span style="word-break:break-word">${escHtml(matchedItems[0].desc)}${matchedItems.length>1?` <em style="color:var(--gray-400)">+${matchedItems.length-1} más</em>`:''}</span>
          </div>` : '';
     return `<div class="cot-card ${statusClass(c.estado)}" style="cursor:pointer" onclick="loadCostosCot('${c.num}')">
-      <div class="cot-head
+      <div class="cot-header">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="cot-num">${c.num}</span>
+            <small style="color:var(--gray-400);font-size:11px">${c.version||''}</small>
+            ${statusBadge(c.estado)}
+            ${tieneCosto ? '<span style="font-size:10px;background:var(--green-light);color:var(--green);padding:2px 7px;border-radius:8px;font-weight:600">✓ Con presupuesto</span>' : ''}
+          </div>
+          <div class="cot-client" style="margin-top:3px">${escHtml(c.cliente)}${c.suc?' — '+escHtml(c.suc):''}</div>
+          ${c.mpio ? `<div style="font-size:12px;color:var(--navy);font-weight:500;margin-top:2px">📍 ${escHtml(c.mpio)}</div>` : '<div style="font-size:11px;color:var(--red)">⚠️ Sin municipio</div>'}
+          ${c.titulo ? `<div class="cot-title">${escHtml(c.titulo)}</div>` : ''}
+          ${itemHint}
+        </div>
+        <div style="text-align:right;flex-shrink:0;margin-left:12px">
+          <div style="font-weight:600;font-size:13px;color:var(--navy)">${fmt(t.total)}</div>
+          <div style="font-size:11px;color:var(--gray-400);margin-top:2px">${(c.items||[]).length} ítems</div>
+          <div style="font-size:11px;color:var(--gray-400)">${fmtDate(c.fecha)}</div>
+          <button class="btn btn-gold btn-sm" style="margin-top:6px;font-size:11px" onclick="event.stopPropagation();loadCostosCot('${c.num}')">Abrir →</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function volverCostosSelector() {
+  document.getElementById('costos-cot-panel').classList.add('hidden');
+  document.getElementById('costos-selector-panel').style.display = '';
+  costoCotActual = null;
+  renderCostoCotResults();
+}
+
+function loadCostosCot(num) {
+  const panel    = document.getElementById('costos-cot-panel');
+  const selector = document.getElementById('costos-selector-panel');
+  if (!num) { if (panel) panel.classList.add('hidden'); if (selector) selector.style.display=''; costoCotActual = null; return; }
+  costoCotActual = num;
+  panel.classList.remove('hidden');
+  if (selector) selector.style.display = 'none';
+
+  const cot    = getCot(num);
+  const costos = getCostosCot(num);
+  const venta  = cot ? calcCot(cot).subtotal : 0;
+  document.getElementById('costo-venta').textContent = fmtMillones(venta);
+
+  // Header info
+  const hdr = document.getElementById('costos-cot-header-info');
+  if (hdr && cot) {
+    hdr.innerHTML = `<strong>${cot.num}</strong> — ${escHtml(cot.cliente)}${cot.titulo?' | '+escHtml(cot.titulo):''} ${statusBadge(cot.estado)}`;
+  }
+
+  // ── Ciudad banner ──
+  const ciudad = cot?.mpio || '';
+  let banner = document.getElementById('costos-ciudad-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'costos-ciudad-banner';
+    panel.insertBefore(banner, panel.children[1]); // after header row
+  }
+  if (ciudad) {
+    const matsDisp  = getMateriales().filter(m => m.ciudad === ciudad).length;
+    const contsDisp = getContratistas().filter(c => (c.ciudades||[c.ciudad]).includes(ciudad)).length;
+    banner.style.cssText = 'background:var(--navy);color:var(--white);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+    banner.innerHTML = `<span style="font-size:18px">📍</span>
+      <div>
+        <strong style="color:var(--gold)">${escHtml(ciudad)}</strong>
+        <span style="color:var(--gray-400);margin-left:8px;font-size:12px">
+          ${matsDisp} material${matsDisp!==1?'es':''} · ${contsDisp} contratista${contsDisp!==1?'s':''} disponibles en esta ciudad
+        </span>
+      </div>`;
+  } else {
+    banner.style.cssText = 'background:var(--red-light);color:var(--red);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;display:flex;align-items:center;gap:8px';
+    banner.innerHTML = `⚠️ Esta cotización no tiene municipio registrado. <a href="#" onclick="editarCotizacion();return false" style="color:var(--red);font-weight:600;text-decoration:underline">Editar cotización</a> para asignarlo.`;
+  }
+
+  costoMatRows  = JSON.parse(JSON.stringify(costos.materiales   || []));
+  costoContRows = JSON.parse(JSON.stringify(costos.contratistas || []));
+  renderCostoMateriales();
+  renderCostoContratistas();
+  recalcMargen();
+  initEjecucion();
+}
+
+function getCotCiudad() {
+  if (!costoCotActual) return '';
+  const cot = getCot(costoCotActual);
+  return cot?.mpio || '';
+}
+
+function renderCostoMateriales() {
+  const tbody = document.getElementById('costo-mat-tbody');
+  if (!tbody) return;
+  const cotCiudad = getCotCiudad();
+  const allMats   = getMateriales();
+
+  // Only names available in cotCiudad (if cotCiudad known); else all
+  const matsEnCiudad = cotCiudad
+    ? allMats.filter(m => m.ciudad === cotCiudad)
+    : allMats;
+  const matNombres = [...new Set(matsEnCiudad.map(m => m.nombre))].sort((a,b) => a.localeCompare(b,'es'));
+
+  tbody.innerHTML = costoMatRows.map((r, i) => {
+    // City column: fixed to cotCiudad if known, editable otherwise
+    const ciudadCell = cotCiudad
+      ? `<td style="color:var(--gray-600);font-size:12px;white-space:nowrap">📍 ${escHtml(cotCiudad)}</td>`
+      : `<td><select style="min-width:110px" onchange="onCMatCiudad(${i},this.value)">
+          <option value="">Ciudad</option>
+          ${[...new Set(allMats.filter(m=>m.nombre===r.nombre).map(m=>m.ciudad))].map(c=>`<option value="${escHtml(c)}" ${c===r.ciudad?'selected':''}>${escHtml(c)}</option>`).join('')}
+        </select></td>`;
+
+    // Price: auto from master, editable
+    return `<tr>
+      <td><select style="min-width:160px" onchange="onCMatNombre(${i},this.value)">
+        <option value="">Material...</option>
+        ${matNombres.map(n=>`<option value="${escHtml(n)}" ${n===r.nombre?'selected':''}>${escHtml(n)}</option>`).join('')}
+        ${r.nombre && !matNombres.includes(r.nombre) ? `<option value="${escHtml(r.nombre)}" selected>${escHtml(r.nombre)} ⚠️</option>` : ''}
+      </select></td>
+      ${ciudadCell}
+      <td><input type="number" value="${r.cant||1}" min="0.01" step="any" style="width:65px" oninput="onCMatCant(${i},this.value)"></td>
+      <td><input type="number" value="${r.precio||0}" min="0" step="any" style="width:100px" oninput="onCMatPrecio(${i},this.value)"></td>
+      <td class="total-cell" id="cmat-t-${i}">${fmt((r.cant||1)*(r.precio||0))}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="costoMatRows.splice(${i},1);renderCostoMateriales();recalcMargen()">✕</button></td>
+    </tr>`;
+  }).join('');
+  recalcMargen();
+}
+
+function addCostoMaterial() {
+  const ciudad = getCotCiudad();
+  costoMatRows.push({ nombre:'', ciudad, cant:1, precio:0 });
+  renderCostoMateriales();
+}
+
+function onCMatNombre(i, v) {
+  costoMatRows[i].nombre = v;
+  const ciudad = getCotCiudad();
+  // Find match in cotCiudad first, then any city
+  const m = getMateriales().find(m => m.nombre === v && (!ciudad || m.ciudad === ciudad))
+         || getMateriales().find(m => m.nombre === v);
+  if (m) {
+    costoMatRows[i].ciudad = m.ciudad;
+    costoMatRows[i].precio = m.precioActual;
+  }
+  renderCostoMateriales();
+}
+
+function onCMatCiudad(i, v) {
+  costoMatRows[i].ciudad = v;
+  const m = getMateriales().find(m => m.nombre === costoMatRows[i].nombre && m.ciudad === v);
+  if (m) costoMatRows[i].precio = m.precioActual;
+  renderCostoMateriales();
+}
+
+function onCMatCant(i, v)   {
+  costoMatRows[i].cant = parseFloat(v) || 0;
+  const t = document.getElementById(`cmat-t-${i}`);
+  if (t) t.textContent = fmt(costoMatRows[i].cant * (costoMatRows[i].precio || 0));
+  recalcMargen();
+}
+function onCMatPrecio(i, v) {
+  costoMatRows[i].precio = parseFloat(v) || 0;
+  const t = document.getElementById(`cmat-t-${i}`);
+  if (t) t.textContent = fmt((costoMatRows[i].cant || 1) * costoMatRows[i].precio);
+  recalcMargen();
+}
+
+function renderCostoContratistas() {
+  const tbody = document.getElementById('costo-cont-tbody');
+  if (!tbody) return;
+  const cotCiudad = getCotCiudad();
+  const allConts  = getContratistas();
+
+  // Filter contratistas that serve cotCiudad (or all if no city)
+  const contsDisp = cotCiudad
+    ? allConts.filter(c => (c.ciudades || (c.ciudad ? [c.ciudad] : [])).includes(cotCiudad))
+    : allConts;
+  const contsSorted = contsDisp.sort((a,b) => a.nombre.localeCompare(b.nombre,'es'));
+
+  const sinCobertura = cotCiudad && contsDisp.length === 0;
+
+  tbody.innerHTML = costoContRows.map((r, i) => {
+    const selC = allConts.find(c => c.id === r.contId);
+    const esps = selC ? (selC.especialidades || []) : [];
+    const notInCity = cotCiudad && selC && !(selC.ciudades || (selC.ciudad ? [selC.ciudad] : [])).includes(cotCiudad);
+    return `<tr ${notInCity ? 'style="background:var(--red-light)"' : ''}>
+      <td>
+        <select style="min-width:160px" onchange="onCCont(${i},this.value)">
+          <option value="">Contratista...</option>
+          ${contsSorted.map(c=>`<option value="${c.id}" ${c.id===r.contId?'selected':''}>${escHtml(c.nombre)}</option>`).join('')}
+          ${notInCity ? `<option value="${r.contId}" selected>⚠️ ${escHtml(selC?.nombre||r.contId)} (fuera de cobertura)</option>` : ''}
+        </select>
+        ${notInCity ? `<div style="font-size:10px;color:var(--red);margin-top:2px">No cubre ${escHtml(cotCiudad)}</div>` : ''}
+      </td>
+      <td><select style="min-width:140px" onchange="costoContRows[${i}].especialidad=this.value">
+        <option value="">Especialidad</option>
+        ${esps.map(e=>`<option value="${escHtml(e)}" ${e===r.especialidad?'selected':''}>${escHtml(e)}</option>`).join('')}
+      </select></td>
+      <td><input type="text" value="${escHtml(r.desc||'')}" placeholder="Descripción" style="min-width:120px" oninput="costoContRows[${i}].desc=this.value"></td>
+      <td><input type="number" value="${r.valor||0}" min="0" step="any" style="width:100px" oninput="onCContValor(${i},this.value)"></td>
+      <td><button class="btn btn-sm btn-danger" onclick="costoContRows.splice(${i},1);renderCostoContratistas();recalcMargen()">✕</button></td>
+    </tr>`;
+  }).join('') + (sinCobertura && costoContRows.length === 0
+    ? `<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--red);font-size:13px">⚠️ No hay contratistas registrados en <strong>${escHtml(cotCiudad)}</strong>. Agrega la ciudad en el módulo de Contratistas.</td></tr>`
+    : '');
+  recalcMargen();
+}
+
+function addCostoContratista() { costoContRows.push({contId:'',especialidad:'',desc:'',valor:0}); renderCostoContratistas(); }
+
+function onCCont(i, v) {
+  costoContRows[i].contId = v;
+  costoContRows[i].especialidad = '';
+  const c = getContratistas().find(c => c.id === v);
+  if (c && c.tarifa) costoContRows[i].valor = c.tarifa;
+  renderCostoContratistas();
+}
+
+function onCContValor(i, v) { costoContRows[i].valor = parseFloat(v) || 0; recalcMargen(); }
+
+function recalcMargen() {
+  const totalMat  = costoMatRows.reduce((s,r)=>s+(r.cant||1)*(r.precio||0),0);
+  const totalCont = costoContRows.reduce((s,r)=>s+(r.valor||0),0);
+  const totalCosto = totalMat + totalCont;
+  const el = document.getElementById('costo-total-costo');
+  if (el) el.textContent = fmtMillones(totalCosto);
+  const cot   = costoCotActual ? getCot(costoCotActual) : null;
+  const venta = cot ? calcCot(cot).subtotal : 0;
+  const margen = venta > 0 ? (venta - totalCosto) / venta * 100 : 0;
+  const mEl = document.getElementById('costo-margen');
+  const mCard = document.getElementById('margen-card');
+  if (mEl) mEl.textContent = margen.toFixed(1) + '%';
+  if (mCard) mCard.className = 'stat-card ' + (margen >= 30 ? 'green' : margen >= 10 ? '' : 'red');
+}
+
+function saveCostosCot() {
+  if (!costoCotActual) return;
+  const allCostos = STORE.get('jma_costos', {});
+  allCostos[costoCotActual] = { materiales: costoMatRows, contratistas: costoContRows, updatedAt: new Date().toISOString().split('T')[0] };
+  STORE.set('jma_costos', allCostos);
+  snack('💾 Presupuesto guardado — ' + costoCotActual);
+}
+
+
+
+// ══════════════════════════════════════════════════════
+// EJECUCIÓN DE PRESUPUESTO
+// ══════════════════════════════════════════════════════
+let ejecMatRows  = [];
+let ejecContRows = [];
+let giroTarget   = null;
+let updPrecioTarget = null;
+
+function getEjecucion(num) {
+  return (STORE.get('jma_ejecucion', {}))[num] || { materiales: [], contratistas: [], cerrada: false, fechaCierre: null };
+}
+
+function initEjecucion() {
+  if (!costoCotActual) return;
+  const costos = getCostosCot(costoCotActual);
+  const ejec   = getEjecucion(costoCotActual);
+  const cerrada = ejec.cerrada || false;
+
+  ejecMatRows = (costos.materiales || []).map(r => {
+    const saved = (ejec.materiales || []).find(e => e.nombre === r.nombre && e.ciudad === r.ciudad) || {};
+    return {
+      nombre:r.nombre, ciudad:r.ciudad,
+      cantPlan:r.cant||1, precioPlan:r.precio||0,
+      cantReal:saved.cantReal ?? r.cant ?? 1,
+      precioReal:saved.precioReal ?? r.precio ?? 0,
+    };
+  });
+
+  ejecContRows = (costos.contratistas || []).map(r => {
+    const saved = (ejec.contratistas || []).find(e => e.contId === r.contId && e.desc === r.desc) || {};
+    const cont  = getContratistas().find(c => c.id === r.contId);
+    return {
+      contId:r.contId, nombre:cont?.nombre||r.contId,
+      espec:r.especialidad||'', desc:r.desc||'',
+      valorPlan:r.valor||0, giros:saved.giros||[], cerrado:saved.cerrado||false,
+    };
+  });
+
+  renderEjecucion(cerrada);
+  updateEjecSummary();
+
+  const badge = document.getElementById('ejec-estado-badge');
+  const btnC  = document.getElementById('btn-cerrar-ejec');
+  const btnR  = document.getElementById('btn-reabrir-ejec');
+  if (cerrada) {
+    if (badge) badge.innerHTML = `<span class="badge badge-facturada">🔒 Cerrada${ejec.fechaCierre?' · '+fmtDate(ejec.fechaCierre):''}</span>`;
+    if (btnC) btnC.style.display = 'none';
+    if (btnR) btnR.style.display = '';
+  } else {
+    if (badge) badge.innerHTML = `<span style="background:var(--amber-light);color:var(--amber);padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">⚙️ En ejecución</span>`;
+    if (btnC) btnC.style.display = '';
+    if (btnR) btnR.style.display = 'none';
+  }
+}
+
+function renderEjecucion(cerrada) { renderEjecMat(cerrada); renderEjecCont(cerrada); }
+
+function renderEjecMat(cerrada) {
+  const tbody = document.getElementById('ejec-mat-tbody');
+  if (!tbody) return;
+  if (!ejecMatRows.length) { tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--gray-400)">Sin materiales en el presupuesto</td></tr>`; return; }
+  tbody.innerHTML = ejecMatRows.map((r, i) => {
+    const totalReal = (r.cantReal||0)*(r.precioReal||0);
+    const totalPlan = (r.cantPlan||1)*(r.precioPlan||0);
+    const desv = totalReal - totalPlan;
+    const dsvStyle = desv>0?'color:var(--red)':desv<0?'color:var(--green)':'color:var(--gray-400)';
+    const precioDif = r.precioReal && r.precioPlan && Math.abs(r.precioReal-r.precioPlan) > 0.01;
+    return `<tr>
+      <td><strong style="font-size:13px">${escHtml(r.nombre)}</strong><div style="font-size:11px;color:var(--gray-400)">📍 ${escHtml(r.ciudad)}</div></td>
+      <td style="color:var(--gray-400);font-size:12px;text-align:right">${r.cantPlan}</td>
+      <td>${cerrada?`<span style="font-weight:600">${r.cantReal}</span>`:`<input type="number" value="${r.cantReal}" min="0" step="any" style="width:70px" oninput="onEjecMatCant(${i},this.value)">`}</td>
+      <td style="color:var(--gray-400);font-size:12px;text-align:right">${fmt(r.precioPlan)}</td>
+      <td>${cerrada
+        ?`<span style="font-weight:600${precioDif?';color:var(--amber)':''}">${fmt(r.precioReal)}</span>`
+        :`<div style="display:flex;align-items:center;gap:4px">
+            <input type="number" value="${r.precioReal}" min="0" step="any" style="width:100px" oninput="onEjecMatPrecio(${i},this.value)">
+            ${precioDif?`<button class="btn btn-sm" style="background:var(--amber-light);color:var(--amber);font-size:10px;padding:4px 6px;white-space:nowrap" onclick="sugerirActualizarPrecio(${i})">⚠️ Act.</button>`:''}
+          </div>`}
+      </td>
+      <td class="total-cell" id="ejec-mat-tot-${i}">${fmt(totalReal)}</td>
+      <td style="${dsvStyle};font-size:12px;white-space:nowrap;text-align:right">${desv!==0?(desv>0?'▲ ':'▼ ')+fmt(Math.abs(desv)):'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function onEjecMatCant(i,v){ ejecMatRows[i].cantReal=parseFloat(v)||0; const t=document.getElementById(`ejec-mat-tot-${i}`); if(t) t.textContent=fmt(ejecMatRows[i].cantReal*(ejecMatRows[i].precioReal||0)); updateEjecSummary(); renderEjecMat(false); }
+function onEjecMatPrecio(i,v){ ejecMatRows[i].precioReal=parseFloat(v)||0; const t=document.getElementById(`ejec-mat-tot-${i}`); if(t) t.textContent=fmt((ejecMatRows[i].cantReal||1)*ejecMatRows[i].precioReal); updateEjecSummary(); renderEjecMat(false); }
+
+function sugerirActualizarPrecio(i) {
+  const r = ejecMatRows[i];
+  const m = getMateriales().find(mat=>mat.nombre===r.nombre && mat.ciudad===r.ciudad);
+  if (!m) { snack('Material no encontrado en el maestro'); return; }
+  updPrecioTarget = { matIdx:i, matId:m.id, precioNuevo:r.precioReal };
+  document.getElementById('upd-precio-desc').textContent = `${r.nombre} en ${r.ciudad}: precio de compra difiere del maestro. ¿Actualizar?`;
+  document.getElementById('upd-precio-anterior').value = fmt(m.precioActual);
+  document.getElementById('upd-precio-nuevo').value    = fmt(r.precioReal);
+  document.getElementById('modal-update-precio').classList.add('active');
+}
+function confirmarActualizarPrecio() {
+  if (!updPrecioTarget) return;
+  const mats = getMateriales();
+  const idx  = mats.findIndex(m=>m.id===updPrecioTarget.matId);
+  if (idx>=0) {
+    const old=mats[idx]; const hoy=new Date().toISOString().split('T')[0];
+    mats[idx]={...old,precioAnterior:old.precioActual,fechaAnterior:old.fechaActual,precioActual:updPrecioTarget.precioNuevo,fechaActual:hoy};
+    STORE.set('jma_materiales',mats);
+    snack('✅ Precio actualizado en el maestro');
+  }
+  closeModal('modal-update-precio'); updPrecioTarget=null; renderEjecMat(false);
+}
+
+function renderEjecCont(cerrada) {
+  const el = document.getElementById('ejec-cont-list');
+  if (!el) return;
+  if (!ejecContRows.length) { el.innerHTML=`<div style="text-align:center;padding:16px;color:var(--gray-400)">Sin contratistas en el presupuesto</div>`; return; }
+  el.innerHTML = ejecContRows.map((r,i) => {
+    const totalGiros = r.giros.reduce((s,g)=>s+(g.valor||0),0);
+    const pendiente  = (r.valorPlan||0)-totalGiros;
+    const pctBar     = r.valorPlan>0?Math.min(100,Math.round(totalGiros/r.valorPlan*100)):0;
+    const barColor   = totalGiros>r.valorPlan?'var(--red)':totalGiros===r.valorPlan?'var(--green)':'var(--gold)';
+    return `<div class="card" style="margin-bottom:10px;${r.cerrado?'border-left:4px solid var(--green)':'border-left:4px solid var(--gold)'}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:14px;color:var(--navy)">${escHtml(r.nombre)}</div>
+          <div style="font-size:12px;color:var(--gray-600)">${escHtml(r.espec)}${r.desc?' · '+escHtml(r.desc):''}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:11px;color:var(--gray-400)">Planificado</div>
+          <div style="font-weight:600;color:var(--navy)">${fmt(r.valorPlan)}</div>
+        </div>
+      </div>
+      <div style="margin:10px 0 6px">
+        <div style="height:6px;background:var(--gray-200);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${pctBar}%;background:${barColor};border-radius:3px;transition:width 0.4s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:3px">
+          <span>Girado: <strong style="color:${barColor}">${fmt(totalGiros)}</strong> (${pctBar}%)</span>
+          <span style="color:${pendiente<0?'var(--red)':'var(--gray-400)'}">
+            ${pendiente<0?'▲ Exceso: '+fmt(Math.abs(pendiente)):pendiente>0?'Pendiente: '+fmt(pendiente):'✅ Completado'}
+          </span>
+        </div>
+      </div>
+      ${r.giros.length?`<div style="margin-top:8px">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-600);margin-bottom:6px">Giros registrados</div>
+        ${r.giros.map((g,gi)=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--gray-100);border-radius:6px;margin-bottom:4px;font-size:12px;flex-wrap:wrap">
+            <span style="color:var(--gray-400);white-space:nowrap">${fmtDate(g.fecha)}</span>
+            <span style="flex:1;min-width:80px">${escHtml(g.concepto)}${g.nota?' — <em style="color:var(--gray-400)">'+escHtml(g.nota)+'</em>':''}</span>
+            <span style="font-weight:600;white-space:nowrap">${fmt(g.valor)}</span>
+            ${!cerrada&&!r.cerrado?`<button class="btn btn-sm btn-danger" style="padding:2px 7px;min-height:28px" onclick="eliminarGiro(${i},${gi})">✕</button>`:''}
+          </div>`).join('')}
+      </div>`:''}
+      ${!cerrada?`<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        ${!r.cerrado
+          ?`<button class="btn btn-sm btn-gold" onclick="abrirGiro(${i})">+ Registrar Giro</button>
+            <button class="btn btn-sm btn-success" onclick="cerrarContratista(${i})">✅ Cerrar trabajo</button>`
+          :`<span style="background:var(--green-light);color:var(--green);padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;align-self:center">✅ Cerrado · ${fmt(totalGiros)}</span>
+            <button class="btn btn-sm btn-outline" style="font-size:11px" onclick="reabrirContratista(${i})">↩️ Reabrir</button>`}
+      </div>`:`<div style="margin-top:8px">${r.cerrado?'<span style="background:var(--green-light);color:var(--green);padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">✅ Cerrado</span>':'<span style="background:var(--amber-light);color:var(--amber);padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">⚠️ Sin cerrar</span>'}</div>`}
+    </div>`;
+  }).join('');
+}
+
+function abrirGiro(contIdx) {
+  const r=ejecContRows[contIdx];
+  const totalGiros=r.giros.reduce((s,g)=>s+(g.valor||0),0);
+  const pendiente=r.valorPlan-totalGiros;
+  giroTarget=contIdx;
+  document.getElementById('modal-giro-title').textContent=`💸 Giro — ${r.nombre}`;
+  document.getElementById('modal-giro-context').innerHTML=
+    `<strong>${escHtml(r.nombre)}</strong> · ${escHtml(r.espec)}<br>
+     Planificado: <strong>${fmt(r.valorPlan)}</strong> · Girado: <strong>${fmt(totalGiros)}</strong> · ${pendiente>=0?'Pendiente: <strong>'+fmt(pendiente)+'</strong>':'<span style="color:var(--red)">Exceso: <strong>'+fmt(Math.abs(pendiente))+'</strong></span>'}`;
+  document.getElementById('giro-concepto').value='';
+  document.getElementById('giro-valor').value=pendiente>0?pendiente:'';
+  document.getElementById('giro-fecha').value=new Date().toISOString().split('T')[0];
+  document.getElementById('giro-nota').value='';
+  document.getElementById('modal-giro').classList.add('active');
+}
+function confirmarGiro() {
+  const concepto=document.getElementById('giro-concepto').value.trim();
+  const valor=parseFloat(document.getElementById('giro-valor').value)||0;
+  const fecha=document.getElementById('giro-fecha').value;
+  const nota=document.getElementById('giro-nota').value.trim();
+  if (!concepto){snack('⚠️ Ingresa el concepto');return;}
+  if (!valor){snack('⚠️ Ingresa el valor');return;}
+  if (!fecha){snack('⚠️ Selecciona la fecha');return;}
+  ejecContRows[giroTarget].giros.push({id:'g-'+Date.now(),concepto,valor,fecha,nota});
+  closeModal('modal-giro'); renderEjecCont(false); updateEjecSummary(); snack('💸 Giro registrado'); giroTarget=null;
+}
+function eliminarGiro(ci,gi){ if(!confirm('¿Eliminar este giro?'))return; ejecContRows[ci].giros.splice(gi,1); renderEjecCont(false); updateEjecSummary(); snack('Giro eliminado'); }
+function cerrarContratista(i){
+  if(!ejecContRows[i].giros.length){snack('⚠️ Registra al menos un giro antes de cerrar');return;}
+  const total=ejecContRows[i].giros.reduce((s,g)=>s+(g.valor||0),0);
+  if(!confirm(`¿Cerrar trabajo de ${ejecContRows[i].nombre}?\nTotal girado: ${fmt(total)}`))return;
+  ejecContRows[i].cerrado=true; renderEjecCont(false); updateEjecSummary(); snack('✅ Trabajo cerrado');
+}
+function reabrirContratista(i){ ejecContRows[i].cerrado=false; renderEjecCont(false); snack('↩️ Trabajo reabierto'); }
+
+function updateEjecSummary() {
+  const matPlan=ejecMatRows.reduce((s,r)=>s+(r.cantPlan||1)*(r.precioPlan||0),0);
+  const matReal=ejecMatRows.reduce((s,r)=>s+(r.cantReal||0)*(r.precioReal||0),0);
+  const contPlan=ejecContRows.reduce((s,r)=>s+(r.valorPlan||0),0);
+  const contReal=ejecContRows.reduce((s,r)=>s+r.giros.reduce((sg,g)=>sg+(g.valor||0),0),0);
+  const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=fmtMillones(v);};
+  s('ejec-mat-plan',matPlan); s('ejec-mat-real',matReal); s('ejec-cont-plan',contPlan); s('ejec-cont-real',contReal);
+  const mc=document.getElementById('ejec-mat-real-card');
+  const cc=document.getElementById('ejec-cont-real-card');
+  if(mc) mc.className='stat-card '+(matReal>matPlan?'red':matReal<matPlan?'green':'');
+  if(cc) cc.className='stat-card '+(contReal>contPlan?'red':contReal===contPlan&&contReal>0?'green':'');
+}
+
+function saveEjecucion() {
+  if (!costoCotActual) return;
+  const all=STORE.get('jma_ejecucion',{});
+  const prev=all[costoCotActual]||{};
+  all[costoCotActual]={...prev,
+    materiales:ejecMatRows.map(r=>({nombre:r.nombre,ciudad:r.ciudad,cantReal:r.cantReal,precioReal:r.precioReal})),
+    contratistas:ejecContRows.map(r=>({contId:r.contId,desc:r.desc,giros:r.giros,cerrado:r.cerrado})),
+    updatedAt:new Date().toISOString().split('T')[0]};
+  STORE.set('jma_ejecucion',all);
+  snack('💾 Ejecución guardada — '+costoCotActual);
+}
+function cerrarEjecucion() {
+  const sinGiros=ejecContRows.filter(r=>!r.giros.length);
+  const abiertos=ejecContRows.filter(r=>!r.cerrado&&r.giros.length);
+  let msg='¿Cerrar la ejecución de esta cotización?';
+  if(sinGiros.length) msg+=`\n\n⚠️ ${sinGiros.length} contratista(s) sin giros.`;
+  if(abiertos.length) msg+=`\n⚠️ ${abiertos.length} trabajo(s) sin cerrar.`;
+  if(!confirm(msg))return;
+  saveEjecucion();
+  const all=STORE.get('jma_ejecucion',{});
+  all[costoCotActual].cerrada=true; all[costoCotActual].fechaCierre=new Date().toISOString().split('T')[0];
+  STORE.set('jma_ejecucion',all); initEjecucion(); snack('🔒 Ejecución cerrada');
+}
+function reabrirEjecucion() {
+  if(!confirm('¿Reabrir la ejecución?'))return;
+  const all=STORE.get('jma_ejecucion',{});
+  if(all[costoCotActual]){all[costoCotActual].cerrada=false;all[costoCotActual].fechaCierre=null;}
+  STORE.set('jma_ejecucion',all); initEjecucion(); snack('🔓 Ejecución reabierta');
+}
+
+
+
+
+// ══════════════════════════════════════════════════════
+// FLUJO DE CAJA
+// ══════════════════════════════════════════════════════
+function renderFlujoCaja() {
+  const allCots   = getCotizacionesUnique();
+  const clientes  = STORE.get('jma_clientes', []);
+  const meses     = parseInt((document.getElementById('flujo-vista')?.value||'6m').replace('m',''));
+  const hoy       = new Date();
+  const mesesData = [];
+
+  // Build month grid from now-2 to now+meses
+  for (let i = -2; i <= meses; i++) {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
+    mesesData.push({ year: d.getFullYear(), month: d.getMonth(), plan: 0, real: 0, cots: [] });
+  }
+
+  const getSlot = (year, month) => mesesData.find(m => m.year === year && m.month === month);
+
+  allCots.forEach(c => {
+    const t = calcCot(c);
+    const valor = t.total; // con IVA (es lo que se cobra al cliente)
+    const cli = clientes.find(x => x.nit === c.nit);
+    const plazoPlan = cli?.plazoPago || 30;
+
+    // ── REAL: cotización pagada ──
+    if (c.pagada === 'SÍ' && c.fechaPago) {
+      const d = new Date(c.fechaPago);
+      const slot = getSlot(d.getFullYear(), d.getMonth());
+      if (slot) { slot.real += valor; slot.cots.push({ num: c.num, cliente: c.cliente, valor, tipo: 'real', fecha: c.fechaPago }); }
+    }
+
+    // ── PLAN: estimar fecha de cobro ──
+    // Priority: fechaFacturaEst + plazoPlan, then fechafactura + plazoPlan, then fecha + duracion + plazoPlan
+    let fechaCobro = null;
+    if (['Aprobada','Sin OC','Facturada'].includes(c.estado) && c.pagada !== 'SÍ') {
+      if (c.fechafactura) {
+        fechaCobro = new Date(c.fechafactura);
+        fechaCobro.setDate(fechaCobro.getDate() + plazoPlan);
+      } else if (c.fechaFacturaEst) {
+        fechaCobro = new Date(c.fechaFacturaEst);
+        fechaCobro.setDate(fechaCobro.getDate() + plazoPlan);
+      } else if (c.fecha) {
+        fechaCobro = new Date(c.fecha);
+        const dur = parseInt(c.duracion) || 15;
+        fechaCobro.setDate(fechaCobro.getDate() + dur + plazoPlan);
+      }
+      if (fechaCobro) {
+        const slot = getSlot(fechaCobro.getFullYear(), fechaCobro.getMonth());
+        if (slot) { slot.plan += valor; slot.cots.push({ num: c.num, cliente: c.cliente, valor, tipo: 'plan', fecha: fechaCobro.toISOString().split('T')[0] }); }
+      }
+    }
+  });
+
+  // ── KPIs ──
+  const totalPlan  = mesesData.filter(m => {
+    const d = new Date(m.year, m.month); return d >= new Date(hoy.getFullYear(), hoy.getMonth());
+  }).reduce((s,m) => s + m.plan, 0);
+  const totalReal  = mesesData.reduce((s,m) => s + m.real, 0);
+  const mesActual  = mesesData.find(m => m.year === hoy.getFullYear() && m.month === hoy.getMonth());
+  const cobradoMes = mesActual?.real || 0;
+  const pendMes    = (mesActual?.plan || 0);
+
+  const kpiEl = document.getElementById('flujo-kpis');
+  if (kpiEl) {
+    const mk = (lbl, v, sub, color) =>
+      `<div class="stat-card" style="border-left-color:${color||'var(--gold)'}">
+         <div class="stat-num" style="font-size:20px">${v}</div>
+         <div class="stat-label">${lbl}</div>
+         ${sub?`<div style="font-size:10px;color:var(--gray-400);margin-top:2px">${sub}</div>`:''}
+       </div>`;
+    kpiEl.innerHTML =
+      mk('Plan próx. ' + meses + ' meses', fmtMillones(totalPlan), 'Aprobadas + Sin OC pendientes', 'var(--navy)') +
+      mk('Cobrado histórico', fmtMillones(totalReal), 'Pagos registrados', 'var(--green)') +
+      mk('Plan mes actual', fmtMillones(pendMes), 'Proyectado para cobrar', 'var(--gold)') +
+      mk('Cobrado este mes', fmtMillones(cobradoMes), '', cobradoMes >= pendMes && pendMes > 0 ? 'var(--green)' : 'var(--amber)');
+  }
+
+  // ── TABLA MES A MES ──
+  const tbody = document.getElementById('flujo-tbody');
+  if (tbody) {
+    let acum = 0;
+    const mesesVis = mesesData.filter(m => {
+      const d = new Date(m.year, m.month);
+      return d >= new Date(hoy.getFullYear(), hoy.getMonth() - 2);
+    });
+    tbody.innerHTML = mesesVis.map(m => {
+      acum += m.real;
+      const esPasado = new Date(m.year, m.month) < new Date(hoy.getFullYear(), hoy.getMonth());
+      const esMes    = m.year === hoy.getFullYear() && m.month === hoy.getMonth();
+      const pendiente = m.plan > 0 && !esPasado ? m.plan : 0;
+      const nombreMes = new Date(m.year, m.month).toLocaleDateString('es-CO', {month:'long', year:'numeric'});
+      const rowStyle  = esMes ? 'background:var(--gold-pale);font-weight:600' : '';
+      const planStyle = m.plan > 0 ? 'color:var(--navy);font-weight:600' : 'color:var(--gray-400)';
+      const realStyle = m.real > 0 ? 'color:var(--green);font-weight:600' : 'color:var(--gray-400)';
+      return `<tr style="${rowStyle}">
+        <td>${nombreMes}${esMes?' <span style="font-size:10px;background:var(--gold);color:var(--navy);padding:1px 6px;border-radius:8px;font-weight:600">HOY</span>':''}</td>
+        <td class="text-right" style="${planStyle}">${m.plan > 0 ? fmtMillones(m.plan) : '—'}</td>
+        <td class="text-right" style="${realStyle}">${m.real > 0 ? fmtMillones(m.real) : '—'}</td>
+        <td class="text-right" style="color:${pendiente > 0 ? 'var(--amber)' : 'var(--gray-400)'}">${pendiente > 0 ? fmtMillones(pendiente) : '—'}</td>
+        <td class="text-right" style="color:var(--navy);font-weight:600">${acum > 0 ? fmtMillones(acum) : '—'}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── KPI CLIENTES: DÍAS REALES VS PLAN ──
+  const kpiCliEl = document.getElementById('flujo-clientes-kpi');
+  if (kpiCliEl) {
+    // Only clients with payment history
+    const cliConHist = clientes.filter(c => c.historialDiasPago?.length);
+    if (!cliConHist.length) { kpiCliEl.innerHTML = ''; return; }
+
+    kpiCliEl.innerHTML = `
+      <div style="font-size:12px;font-weight:600;color:var(--gray-600);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">
+        ⏱️ Tiempo real de pago por cliente (vs. plazo acordado)
+      </div>
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr>
+            <th>Cliente</th><th>NIT</th><th class="text-right">Plazo acordado</th>
+            <th class="text-right">Promedio real</th><th class="text-right">Último pago</th>
+            <th class="text-right">Desviación</th><th>Pagos</th>
+          </tr></thead>
+          <tbody>
+            ${cliConHist.map(cli => {
+              const hist = cli.historialDiasPago || [];
+              const promReal = hist.length ? Math.round(hist.reduce((s,h)=>s+h.dias,0)/hist.length) : null;
+              const ultimo   = hist.length ? hist[hist.length-1] : null;
+              const plan     = cli.plazoPago || null;
+              const desv     = plan && promReal !== null ? promReal - plan : null;
+              const dStyle   = desv === null ? '' : desv <= 0 ? 'color:var(--green);font-weight:600' : desv <= 5 ? 'color:var(--amber);font-weight:600' : 'color:var(--red);font-weight:600';
+              return `<tr>
+                <td><strong>${escHtml(cli.nombre)}</strong>${cli.suc?' <small style="color:var(--gray-400)">'+escHtml(cli.suc)+'</small>':''}</td>
+                <td style="font-size:12px;color:var(--gray-400)">${escHtml(cli.nit||'')}</td>
+                <td class="text-right">${plan !== null ? plan + ' días' : '<span style="color:var(--gray-400)">—</span>'}</td>
+                <td class="text-right" style="font-weight:600">${promReal !== null ? promReal + ' días' : '—'}</td>
+                <td class="text-right" style="font-size:12px;color:var(--gray-400)">${ultimo ? fmtDate(ultimo.fecha) + ' (' + ultimo.dias + 'd)' : '—'}</td>
+                <td class="text-right" style="${dStyle}">
+                  ${desv === null ? '—' : desv === 0 ? '✅ En plazo' : desv < 0 ? '▼ ' + Math.abs(desv) + 'd antes' : '▲ ' + desv + 'd tarde'}
+                </td>
+                <td style="font-size:12px">${hist.length} pago${hist.length!==1?'s':''}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+}
+
+
+
+// ══════════════════════════════════════════════════════
+// GENERADOR PDF COTIZACIÓN — fiel al diseño oficial
+// ══════════════════════════════════════════════════════
+const LOGO_B64 = "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";
+
+function generarPDFCotizacion(cotNum) {
+  const c = cotNum ? getCot(cotNum) : buildCotFromForm();
+  if (!c) { snack('⚠️ Guarda la cotización primero'); return; }
+  const t = calcCot(c);
+
+  // Fecha validez
+  const fechaValidez = c.fecha
+    ? new Date(new Date(c.fecha).getTime() + (c.validez||15)*86400000)
+        .toLocaleDateString('es-CO',{day:'2-digit',month:'2-digit',year:'2-digit'})
+    : '';
+  const fechaEmision = c.fecha
+    ? new Date(c.fecha).toLocaleDateString('es-CO',{day:'2-digit',month:'2-digit',year:'2-digit'})
+    : '';
+
+  // Items rows
+  const itemRows = (c.items||[]).map((it,i) => {
+    const total = (it.cant||0)*(it.precio||0);
+    return `
+      <tr>
+        <td class="it-num">${i+1}</td>
+        <td class="it-desc">${escHtml(it.desc||'')}${it.nota ? '<br><span style="font-size:8pt;color:#607D8B;font-style:italic">'+escHtml(it.nota)+'</span>' : ''}</td>
+        <td class="it-qty">${it.cant}</td>
+        <td class="it-price">$ ${fmtCOP(it.precio||0)}</td>
+        <td class="it-total">$ ${fmtCOP(total)}</td>
+      </tr>`;
+  }).join('');
+
+  // Condiciones
+  const condLines = (c.condiciones||'').split('\n').filter(l=>l.trim());
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>${c.num} — ${c.cliente}</title>
+<style>
+  @page { margin: 12mm 14mm; size: A4; }
+  * { box-sizing: border-box; margin:0; padding:0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #1A1A2E; background:#fff; }
+
+  /* ── HEADER ── */
+  .header { display:flex; background:#0F2D5E; color:#fff; padding:0; margin-bottom:0; }
+  .header-logo { width:66px; min-width:66px; background:#0F2D5E; display:flex; align-items:center; justify-content:center; padding:6px; }
+  .header-logo img { width:54px; height:54px; object-fit:contain; }
+  .header-brand { flex:1; background:#0F2D5E; padding:7px 10px; border-left:3px solid #4CD137; }
+  .brand-name { font-size:15pt; font-weight:900; color:#fff; letter-spacing:1px; line-height:1; }
+  .brand-sub  { font-size:6.5pt; color:#4CD137; font-weight:700; letter-spacing:2px; text-transform:uppercase; margin-top:1px; }
+  .brand-tag  { font-size:6.5pt; color:#4CD137; margin-top:2px; }
+  .brand-nit  { font-size:6.5pt; color:#C8D4E8; margin-top:1px; }
+  .header-cot { width:140px; min-width:140px; background:#1A3D72; padding:7px 10px; display:flex; flex-direction:column; justify-content:center; }
+  .cot-label  { font-size:6pt; color:#C8D4E8; font-weight:700; letter-spacing:1px; text-transform:uppercase; line-height:1.3; }
+  .cot-value  { font-size:9pt; color:#fff; font-weight:700; line-height:1.3; }
+  .cot-divider{ border:none; border-top:1px solid rgba(255,255,255,0.2); margin:2px 0; }
+  .brand-dates { display:flex; gap:12px; margin-top:4px; }
+  .brand-date-item { flex:1; }
+
+  /* ── INFO ROW: CLIENT + PROJECT ── */
+  .info-row { display:flex; border:1px solid #D6E4F7; border-top:none; margin-bottom:0; }
+  .info-block { flex:1; padding:8px 12px; }
+  .info-block + .info-block { border-left:1px solid #D6E4F7; }
+  .info-title { font-size:7pt; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#0F2D5E; background:#F4F6FA; margin:-8px -12px 6px -12px; padding:4px 12px; border-bottom:2px solid #4CD137; }
+  .info-line { font-size:8pt; color:#1A1A2E; line-height:1.6; }
+  .info-line strong { color:#0F2D5E; }
+
+  /* ── ITEMS TABLE ── */
+  table.items { width:100%; border-collapse:collapse; margin-top:0; }
+  table.items thead tr { background:#0F2D5E; color:#fff; }
+  table.items thead th { padding:5px 8px; font-size:7.5pt; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; text-align:left; border:none; }
+  table.items thead th.right { text-align:right; }
+  table.items tbody tr:nth-child(even) { background:#F4F6FA; }
+  table.items tbody tr { border-bottom:1px solid #D6E4F7; }
+  table.items td { padding:5px 8px; font-size:8.5pt; vertical-align:top; }
+  .it-num   { width:28px; text-align:center; color:#607D8B; font-weight:700; }
+  .it-desc  { }
+  .it-qty   { width:55px; text-align:right; }
+  .it-price { width:90px; text-align:right; white-space:nowrap; }
+  .it-total { width:90px; text-align:right; white-space:nowrap; font-weight:700; }
+
+  /* ── TOTALS ── */
+  .totals-wrap { display:flex; justify-content:flex-end; border:1px solid #D6E4F7; border-top:none; }
+  .totals-box { width:260px; }
+  .totals-row { display:flex; justify-content:space-between; padding:3px 12px; font-size:9pt; border-bottom:1px solid #D6E4F7; }
+  .totals-row .lbl { color:#607D8B; }
+  .totals-row .val { font-weight:600; text-align:right; }
+  .totals-row.grand { background:#0F2D5E; }
+  .totals-row.grand .lbl { color:#4CD137; font-weight:700; }
+  .totals-row.grand .val { color:#fff; font-size:11pt; font-weight:900; }
+
+  /* ── OBS + CONDITIONS ── */
+  .obs-cond { display:flex; border:1px solid #D6E4F7; border-top:none; margin-bottom:0; }
+  .obs-block { flex:1; padding:8px 12px; }
+  .obs-block + .obs-block { border-left:1px solid #D6E4F7; }
+  .block-title { font-size:7pt; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#0F2D5E; background:#F4F6FA; margin:-8px -12px 6px -12px; padding:4px 12px; border-bottom:1px solid #D6E4F7; }
+  .obs-text { font-size:8pt; color:#1A1A2E; line-height:1.6; white-space:pre-wrap; }
+  .cond-line { font-size:8pt; color:#1A1A2E; line-height:1.8; }
+  .cond-line::before { content:"✓"; color:#4CD137; margin-right:5px; font-weight:700; }
+
+  /* ── SIGNATURES ── */
+  .sigs { display:flex; border:1px solid #D6E4F7; border-top:none; }
+  .sig-block { flex:1; padding:24px 20px 10px; text-align:center; font-size:7.5pt; color:#607D8B; }
+  .sig-block + .sig-block { border-left:1px solid #D6E4F7; }
+  .sig-line { border-top:1px solid #1A1A2E; margin-bottom:4px; }
+  .sig-label { font-weight:700; color:#0F2D5E; text-transform:uppercase; letter-spacing:0.5px; }
+
+  /* ── FOOTER ── */
+  .footer { background:#0F2D5E; color:#4CD137; text-align:center; font-size:7.5pt; font-weight:700; letter-spacing:2px; padding:6px; margin-top:0; text-transform:uppercase; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-logo">
+    <img src="data:image/jpeg;base64,${LOGO_B64}" alt="JMA">
+  </div>
+  <div class="header-brand">
+    <div class="brand-sub">SERVINGENIERIA</div>
+    <div class="brand-name">JMA</div>
+    <div class="brand-tag">Su mejor aliado para todo tipo de mantenimiento o remodelaciones</div>
+    <div class="brand-nit" style="font-size:6.5pt;color:#C8D4E8;margin-top:1px">NIT. 900.296.310.3</div>
+    <div class="brand-dates">
+      <div class="brand-date-item">
+        <div class="cot-label">Emitida el</div>
+        <div class="cot-value" style="font-size:7.5pt">${fechaEmision}</div>
+      </div>
+      <div class="brand-date-item">
+        <div class="cot-label">Válida hasta</div>
+        <div class="cot-value" style="font-size:7.5pt">${fechaValidez}</div>
+      </div>
+      <div class="brand-date-item">
+        <div class="cot-label">Forma de pago</div>
+        <div class="cot-value" style="font-size:7.5pt">${escHtml(c.pago||'Crédito')}</div>
+      </div>
+    </div>
+  </div>
+  <div class="header-cot">
+    <div class="cot-label">Cotización No.</div>
+    <div class="cot-value" style="font-size:12pt">${c.num}</div>
+  </div>
+</div>
+
+<!-- CLIENT + PROJECT -->
+<div class="info-row">
+  <div class="info-block">
+    <div class="info-title">Cliente</div>
+    <div class="info-line"><strong>${escHtml(c.cliente||'')}</strong></div>
+    ${c.contacto?`<div class="info-line">${escHtml(c.contacto)}</div>`:''}
+    ${c.tel?`<div class="info-line">${escHtml(String(c.tel))}</div>`:''}
+    ${c.email?`<div class="info-line">${escHtml(c.email)}</div>`:''}
+    ${c.dir?`<div class="info-line">${escHtml(c.dir)}</div>`:''}
+    ${c.nit?`<div class="info-line" style="margin-top:4px;color:#607D8B;font-size:7.5pt">NIT: ${escHtml(c.nit)}</div>`:''}
+  </div>
+  <div class="info-block">
+    <div class="info-title">Proyecto</div>
+    <div class="info-line"><strong>${escHtml(c.titulo||'')}</strong></div>
+    ${c.suc?`<div class="info-line">SALA: ${escHtml(c.suc)}</div>`:''}
+    ${c.mpio?`<div class="info-line">MUNICIPIO: ${escHtml(c.mpio)}</div>`:''}
+    ${c.duracion?`<div class="info-line" style="margin-top:4px;color:#607D8B;font-size:7.5pt">Duración estimada: ${c.duracion} días</div>`:''}
+  </div>
+</div>
+
+<!-- ITEMS TABLE -->
+<table class="items">
+  <thead>
+    <tr>
+      <th class="it-num">Ítem</th>
+      <th>Descripción</th>
+      <th class="right" style="width:55px">Cantidad</th>
+      <th class="right" style="width:90px">Valor Unit.</th>
+      <th class="right" style="width:90px">Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${itemRows}
+  </tbody>
+</table>
+
+<!-- TOTALS -->
+<div class="totals-wrap">
+  <div class="totals-box">
+    <div class="totals-row">
+      <span class="lbl">SUBTOTAL</span>
+      <span class="val">$ ${fmtCOP(t.subtotal)}</span>
+    </div>
+    <div class="totals-row">
+      <span class="lbl">IVA (19%)</span>
+      <span class="val">$ ${fmtCOP(t.iva)}</span>
+    </div>
+    <div class="totals-row grand">
+      <span class="lbl">TOTAL</span>
+      <span class="val">$ ${fmtCOP(t.total)}</span>
+    </div>
+  </div>
+</div>
+
+<!-- OBS + CONDITIONS -->
+<div class="obs-cond">
+  <div class="obs-block">
+    <div class="block-title">Observaciones</div>
+    <div class="obs-text">${escHtml(c.obs||'')}</div>
+  </div>
+  <div class="obs-block">
+    <div class="block-title">Condiciones</div>
+    ${condLines.map(l=>`<div class="cond-line">${escHtml(l)}</div>`).join('')}
+  </div>
+</div>
+
+<!-- SIGNATURES -->
+<div class="sigs">
+  <div class="sig-block">
+    <div class="sig-line"></div>
+    <div class="sig-label">SERVINGENIERÍA JMA S.A.S.</div>
+  </div>
+  <div class="sig-block">
+    <div class="sig-line"></div>
+    <div class="sig-label">Recibido Cliente</div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<div class="footer">SERVINGENIERÍA JMA S.A.S. &nbsp;·&nbsp; MANTENIMIENTO CONFIABLE</div>
+
+</body>
+</html>`;
+
+  const fname = (c.num||'cotizacion') + (c.cliente ? '_' + c.cliente.replace(/[^a-zA-Z0-9]/g,'_').slice(0,18) : '') + '.pdf';
+  snack('⏳ Generando PDF…');
+
+  // Create iframe visible but off-screen (html2canvas needs visible elements)
+  const _frame = document.createElement('iframe');
+  _frame.style.cssText = 'position:fixed;top:0;left:-900px;width:794px;height:1123px;border:none;z-index:9999;background:#fff;';
+  document.body.appendChild(_frame);
+
+  // Assign onload BEFORE writing content to guarantee it fires
+  _frame.onload = function() {
+    const win  = _frame.contentWindow;
+    const body = win.document.body;
+    body.style.margin = '0';
+    body.style.padding = '0';
+
+    // Give images a moment to paint before capturing
+    setTimeout(function() {
+      // Measure actual content height to avoid blank pages
+      const contentH = body.scrollHeight;
+      html2canvas(body, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        width: 794,
+        height: contentH,
+        windowWidth: 794,
+        windowHeight: contentH,
+        logging: false
+      }).then(function(canvas) {
+        document.body.removeChild(_frame);
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit: 'px', format: 'a4', orientation: 'portrait' });
+        const pW = pdf.internal.pageSize.getWidth();   // px width of A4
+        const pH = pdf.internal.pageSize.getHeight();  // px height of A4
+        // Scale canvas to fit page width
+        const scale  = pW / canvas.width;
+        const imgH   = canvas.height * scale;          // total image height in px
+        const totalPages = Math.ceil(imgH / pH);
+        for (let i = 0; i < totalPages; i++) {
+          if (i > 0) pdf.addPage();
+          // Crop each page from the canvas
+          const srcY  = Math.round((i * pH) / scale);
+          const srcH  = Math.round(pH / scale);
+          const pageCanvas = document.createElement('canvas');
+          pageCanvas.width  = canvas.width;
+          pageCanvas.height = Math.min(srcH, canvas.height - srcY);
+          if (pageCanvas.height <= 0) break;
+          pageCanvas.getContext('2d').drawImage(canvas, 0, srcY, canvas.width, pageCanvas.height, 0, 0, canvas.width, pageCanvas.height);
+          const imgData = pageCanvas.toDataURL('image/jpeg', 0.95);
+          const pageImgH = pageCanvas.height * scale;
+          pdf.addImage(imgData, 'JPEG', 0, 0, pW, pageImgH);
+        }
+        pdf.save(fname);
+        snack('✅ PDF descargado: ' + fname);
+      }).catch(function(err) {
+        document.body.removeChild(_frame);
+        console.error('html2canvas error:', err);
+        snack('⚠️ Error al generar PDF — revisa la consola');
+      });
+    }, 600);
+  };
+
+  // Write HTML into iframe after onload is assigned
+  const fdoc = _frame.contentDocument || _frame.contentWindow.document;
+  fdoc.open();
+  fdoc.write(html);
+  fdoc.close();
+}
+
+function buildCotFromForm() {
+  return {
+    num:      document.getElementById('cot-num').value,
+    titulo:   document.getElementById('cot-titulo').value,
+    estado:   document.getElementById('cot-estado').value,
+    fecha:    document.getElementById('cot-fecha').value,
+    validez:  parseInt(document.getElementById('cot-validez').value)||15,
+    pago:     document.getElementById('cot-pago').value,
+    version:  document.getElementById('cot-version').value,
+    cliente:  document.getElementById('cli-nombre').value,
+    contacto: document.getElementById('cli-contacto').value,
+    tel:      document.getElementById('cli-tel').value,
+    email:    document.getElementById('cli-email').value,
+    dir:      document.getElementById('cli-dir').value,
+    suc:      document.getElementById('cli-suc').value,
+    nit:      document.getElementById('cli-nit').value,
+    mpio:     document.getElementById('cli-mpio').value,
+    obs:      document.getElementById('cot-obs').value,
+    condiciones: document.getElementById('cot-condiciones').value,
+    duracion: document.getElementById('cot-duracion').value,
+    items:    getItemsFromDOM(),
+  };
+}
+
+function fmtCOP(n) {
+  return Math.round(n||0).toLocaleString('es-CO');
+}
+
+
+
+function loginFirebase() {
+  const email = document.getElementById('login-email').value.trim();
+  const pass  = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('login-btn');
+  if (!email || !pass) { errEl.textContent = 'Ingresa correo y contraseña'; return; }
+  btn.textContent = 'Ingresando...'; btn.disabled = true; errEl.textContent = '';
+  window._fb.signInWithEmailAndPassword(window._fb.auth, email, pass)
+    .then(() => { btn.textContent = 'Ingresar'; btn.disabled = false; })
+    .catch(err => {
+      btn.textContent = 'Ingresar'; btn.disabled = false;
+      errEl.textContent = err.code === 'auth/invalid-credential' ? 'Correo o contraseña incorrectos' : 'Error: ' + err.message;
+    });
+}
+
+function logoutFirebase() {
+  if (!confirm('¿Cerrar sesión?')) return;
+  window._fb.signOut(window._fb.auth);
+}
+
+function init() {
+  // Merge stored catalog with built-in
+  const stored = STORE.get('jma_catalogo', []);
+  stored.forEach(a => {
+    if (!CATALOGO_ACTIVIDADES.some(x => x.n === a.n)) {
+      CATALOGO_ACTIVIDADES.push(a);
+    }
+  });
+  CATALOGO_ACTIVIDADES.sort((a,b) => a.n.localeCompare(b.n));
+
+  // Load fresh data from Firebase, then seed if needed
+  STORE.loadFromFirebase().then(() => {
+    seedData();
+
+  // Date in topbar
+  const now = new Date();
+  document.getElementById('topbarDate').textContent = now.toLocaleDateString('es-CO', {day:'2-digit', month:'short', year:'numeric'});
+
+  populateMunicipiosSelect('cli-mpio');
+  populateClientesSelect();
+
+  // Set next cotization number
+  const seq = STORE.get('jma_seq', 7);
+  document.getElementById('cot-num').value = 'COT-JMA-' + String(seq).padStart(4,'0');
+  document.getElementById('cot-version').value = 'V.1';
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('cot-fecha').value = today;
+
+  addItem();
+  updateEstadoDisplay('Borrador');
+  renderDashboard();
+
+  // Close modals on overlay click
+  document.querySelectorAll('.modal-overlay').forEach(m => {
+    m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); });
+  });
+  }); // end STORE.loadFromFirebase
+}
+
+init();
+</script>
+</body>
+</html>
