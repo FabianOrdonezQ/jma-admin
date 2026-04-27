@@ -5959,24 +5959,30 @@ function restablecerDatos() {
               'jma_contratistas','jma_costos','jma_ejecucion',
               'jma_seq','jma_seeded'];
 
-  // Clear localStorage immediately
-  KEYS.forEach(function(k) { localStorage.removeItem(k); });
+  // Clear via STORE (handles both localStorage + Firestore sync)
+  STORE.set('jma_cotizaciones', []);
+  STORE.set('jma_clientes', []);
+  STORE.set('jma_materiales', []);
+  STORE.set('jma_contratistas', []);
+  STORE.set('jma_costos', {});
+  STORE.set('jma_ejecucion', {});
+  localStorage.removeItem('jma_seq');
+  localStorage.removeItem('jma_seeded');
 
-  // Clear Firestore if connected
-  if (window._fb && window._fbUser) {
-    var promises = KEYS.map(function(k) {
-      try {
-        return window._fb.deleteDoc(window._fb.doc(window._fb.db, 'jma_data', k));
-      } catch(e) { return Promise.resolve(); }
-    });
-    Promise.all(promises)
-      .then(function() { snack('Datos eliminados. Recargando...'); })
-      .catch(function() { snack('Datos locales eliminados. Recargando...'); })
-      .finally(function() { setTimeout(function() { location.reload(); }, 1200); });
-  } else {
-    snack('Datos locales eliminados. Recargando...');
-    setTimeout(function() { location.reload(); }, 1200);
+  // Also remove from Firestore directly if available
+  if (window._fb) {
+    try {
+      var db = window._fb.db;
+      var docFn = window._fb.doc;
+      var delFn = window._fb.deleteDoc;
+      KEYS.forEach(function(k) {
+        delFn(docFn(db, 'jma_data', k)).catch(function(){});
+      });
+    } catch(e) {}
   }
+
+  snack('Datos eliminados. Recargando...');
+  setTimeout(function() { location.reload(); }, 1500);
 }
 
 function init() {
