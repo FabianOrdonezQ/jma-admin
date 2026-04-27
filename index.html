@@ -3524,6 +3524,9 @@ function renderGestionar() {
             ${itemHint}
           </div>
           ${statusBadge(c.estado)}
+          <button onclick="event.stopPropagation();eliminarCotizacionNum('${c.num}')"
+            style="margin-left:8px;background:transparent;border:1px solid var(--gray-300);color:var(--red);border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;flex-shrink:0"
+            title="Eliminar cotización">🗑️</button>
         </div>
         <div class="cot-footer">
           <span class="cot-total">${fmt(t.total)}</span>
@@ -5910,30 +5913,27 @@ function loginFirebase() {
     });
 }
 
-function eliminarCotizacion() {
-  if (!currentDetalle) return;
-  const num = currentDetalle.num;
+function eliminarCotizacionNum(num) {
   if (!confirm('¿Eliminar la cotización ' + num + '?\n\nEsta acción no se puede deshacer.')) return;
-
-  // Remove from cotizaciones
   let cots = STORE.get('jma_cotizaciones', []);
-  cots = cots.filter(c => c.num !== num);
+  cots = cots.filter(function(c) { return c.num !== num; });
   STORE.set('jma_cotizaciones', cots);
-
-  // Remove associated costs and execution
   const costos = STORE.get('jma_costos', {});
   delete costos[num];
   STORE.set('jma_costos', costos);
-
   const ejec = STORE.get('jma_ejecucion', {});
   delete ejec[num];
   STORE.set('jma_ejecucion', ejec);
+  renderGestionar();
+  renderDashboard();
+  snack('🗑️ Cotización ' + num + ' eliminada');
+}
 
+function eliminarCotizacion() {
+  if (!currentDetalle) return;
+  eliminarCotizacionNum(currentDetalle.num);
   closeModal('modal-detalle');
   currentDetalle = null;
-  renderDashboard();
-  renderGestionar();
-  snack('🗑️ Cotización ' + num + ' eliminada');
 }
 
 function logoutFirebase() {
