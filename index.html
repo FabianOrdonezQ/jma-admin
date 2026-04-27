@@ -1008,6 +1008,9 @@
         document.getElementById('login-screen')?.classList.add('hidden');
         document.getElementById('app-shell')?.classList.remove('hidden');
         document.getElementById('topbar-user-email').textContent = user.email;
+        // Show Restablecer only for admin
+        const btnRest = document.getElementById('btn-restablecer');
+        if (btnRest) btnRest.style.display = user.email === 'fabordoqui@gmail.com' ? 'inline-block' : 'none';
         if (!window._fbLoaded) { window._fbLoaded = true; init(); }
       } else {
         document.getElementById('login-screen')?.classList.remove('hidden');
@@ -1091,7 +1094,7 @@
   <div class="topbar-date" id="topbarDate"></div>
   <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
     <span id="topbar-user-email" style="font-size:11px;color:rgba(255,255,255,0.6);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-    <button onclick="restablecerDatos()" style="background:rgba(220,50,50,0.25);border:1px solid rgba(255,100,100,0.4);color:#ffaaaa;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer" title="Borrar todos los datos y empezar en blanco">🗑️ Restablecer</button>
+    <button id="btn-restablecer" onclick="restablecerDatos()" style="display:none;background:rgba(220,50,50,0.25);border:1px solid rgba(255,100,100,0.4);color:#ffaaaa;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer" title="Solo admin — Borrar todos los datos">🗑️ Restablecer</button>
     <button onclick="logoutFirebase()" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer" title="Cerrar sesión">⎋ Salir</button>
   </div>
 </div>
@@ -1859,6 +1862,7 @@
     <div class="modal-body" id="modal-det-body"></div>
     <div class="modal-footer">
       <button class="btn btn-outline btn-sm" onclick="closeModal('modal-detalle')">Cerrar</button>
+      <button class="btn btn-sm" style="background:#c0392b;color:#fff;margin-right:auto" onclick="eliminarCotizacion()" title="Eliminar esta cotización permanentemente">🗑️ Eliminar</button>
       <button class="btn btn-primary btn-sm" onclick="editarCotizacion()">✏️ Editar</button>
       <button class="btn btn-gold btn-sm" onclick="printCotizacion()">⬇️ PDF</button>
     </div>
@@ -5904,6 +5908,32 @@ function loginFirebase() {
       btn.textContent = 'Ingresar'; btn.disabled = false;
       errEl.textContent = err.code === 'auth/invalid-credential' ? 'Correo o contraseña incorrectos' : 'Error: ' + err.message;
     });
+}
+
+function eliminarCotizacion() {
+  if (!currentDetalle) return;
+  const num = currentDetalle.num;
+  if (!confirm('¿Eliminar la cotización ' + num + '?\n\nEsta acción no se puede deshacer.')) return;
+
+  // Remove from cotizaciones
+  let cots = STORE.get('jma_cotizaciones', []);
+  cots = cots.filter(c => c.num !== num);
+  STORE.set('jma_cotizaciones', cots);
+
+  // Remove associated costs and execution
+  const costos = STORE.get('jma_costos', {});
+  delete costos[num];
+  STORE.set('jma_costos', costos);
+
+  const ejec = STORE.get('jma_ejecucion', {});
+  delete ejec[num];
+  STORE.set('jma_ejecucion', ejec);
+
+  closeModal('modal-detalle');
+  currentDetalle = null;
+  renderDashboard();
+  renderGestionar();
+  snack('🗑️ Cotización ' + num + ' eliminada');
 }
 
 function logoutFirebase() {
