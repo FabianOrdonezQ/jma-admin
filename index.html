@@ -1011,32 +1011,27 @@
 
   <!-- Fallback: if Firebase module fails to load (file:// or no internet), run app with localStorage only -->
   <script>
-    // If opened as file://, Firebase ES modules won't load due to CORS — start immediately
+    function _initLocalMode(reason) {
+      if (window._fbLoaded) return; // Firebase already handled it
+      console.warn('Firebase no cargo — modo offline');
+      window._fbUser = { email: 'local@jma.co' };
+      window._fbLoaded = true;
+      document.getElementById('login-screen')?.classList.add('hidden');
+      document.getElementById('app-shell')?.classList.remove('hidden');
+      var emailEl = document.getElementById('topbar-user-email');
+      if (emailEl) emailEl.textContent = '(sin conexion)';
+      if (typeof init === 'function') init();
+    }
+
     if (window.location.protocol === 'file:') {
-      window.addEventListener('DOMContentLoaded', function() {
-        window._fbUser = { email: 'local@jma.co' };
-        window._fbLoaded = true;
-        document.getElementById('login-screen')?.classList.add('hidden');
-        document.getElementById('app-shell')?.classList.remove('hidden');
-        var emailEl = document.getElementById('topbar-user-email');
-        if (emailEl) emailEl.textContent = '(modo local)';
-        init();
+      // file:// — Firebase modules blocked by CORS, start immediately after DOM ready
+      document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() { _initLocalMode('file://'); }, 100);
       });
     } else {
-      // Online: give Firebase 4s to load, then fallback
+      // Online — give Firebase plenty of time (10s) before fallback
       window.addEventListener('load', function() {
-        setTimeout(function() {
-          if (!window._firebaseReady && !window._fbLoaded) {
-            console.warn('Firebase no cargo — modo offline');
-            window._fbUser = { email: 'local@jma.co' };
-            window._fbLoaded = true;
-            document.getElementById('login-screen')?.classList.add('hidden');
-            document.getElementById('app-shell')?.classList.remove('hidden');
-            var emailEl = document.getElementById('topbar-user-email');
-            if (emailEl) emailEl.textContent = '(sin conexion)';
-            init();
-          }
-        }, 4000);
+        setTimeout(function() { _initLocalMode('timeout'); }, 10000);
       });
     }
   </script>
@@ -3171,6 +3166,8 @@ function catSearch(idx) {
   const hits = CATALOGO_ACTIVIDADES.filter(function(a) {
     return a.n.toUpperCase().indexOf(q) >= 0 || a.e.toUpperCase().indexOf(q) >= 0;
   }).slice(0, 12);
+
+  console.log('catSearch:', q, '→', hits.length, 'hits');
 
   if (!hits.length) { drop.classList.remove('open'); drop.innerHTML = ''; return; }
 
