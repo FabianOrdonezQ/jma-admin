@@ -2383,54 +2383,9 @@ const STORE = {
 // Seed initial data from macro
 function seedData() {
   if (STORE.get('jma_seeded', false)) return;
-
-  const rawCots = [
-    { num:'COT-JMA-0001', titulo:'', version:'V.8', estado:'Borrador', fecha:'2025-05-22', cliente:'Alfagres S.A.', contacto:'Leonardo Fabio Guarín', tel:'3188007335', email:'leonardo.guarin@alfa.com.co', dir:'Diagonal 15 58-08', suc:'Tienda Diagonal 15', nit:'860032550-7', mpio:'Bucaramanga', pago:'Crédito', validez:15, obs:'', aprobado:'NO', oc:'', facturado:'NO', nfact:'', items:[
-      {desc:'BROCHAS PARA PINTAR', cant:34, precio:12000},
-      {desc:'LIMPIEZA FACHADA SALA', cant:1, precio:230000},
-      {desc:'PRUEBA 3', cant:2, precio:347990},
-      {desc:'PRUEBA 122', cant:1, precio:34000}
-    ]},
-    { num:'COT-JMA-0002', titulo:'MANTENIMIENTO DE LA SALA TIENDA CAPRI', version:'V.2', estado:'Borrador', fecha:'2025-05-18', cliente:'Alfagres S.A.', contacto:'Diego Vivas', tel:'3188007319', email:'diego.vivas@alfa.com.co', dir:'Calle 5 78a-151', suc:'Tienda Capri', nit:'860032550-7', mpio:'Cali', pago:'Crédito', validez:15, obs:'Los materiales se encuentran certificados', aprobado:'NO', oc:'', facturado:'NO', nfact:'', items:[
-      {desc:'BASES PARA REPARACIÓN', cant:12, precio:430000},
-      {desc:'FORMALETAS PARA EL MONTAJE', cant:65, precio:32344},
-      {desc:'LIMPIEZA DE CANALES', cant:21, precio:760000}
-    ]},
-    { num:'COT-JMA-0003', titulo:'Mantenimiento de la Planta Metalteco', version:'V.2', estado:'Borrador', fecha:'2025-05-18', cliente:'Metalteco SAS', contacto:'Gina Loaiza', tel:'3177009935', email:'gina.loaiza@metalteco.com', dir:'Km 6 vía Girón', suc:'Planta Metalteco', nit:'800042867-0', mpio:'Girón', pago:'Crédito', validez:15, obs:'Si requieren servicio de profesional SST se cotizará como un item independiente', aprobado:'NO', oc:'', facturado:'NO', nfact:'', items:[
-      {desc:'PRUEBA 1', cant:65, precio:23000},
-      {desc:'PRUEBA 2', cant:3, precio:670000},
-      {desc:'PRUEBA 4', cant:4, precio:349000},
-      {desc:'PRUEBA 5', cant:23, precio:34000}
-    ]},
-    { num:'COT-JMA-0004', titulo:'MANTENIMIENTO EDIFICIO ADMINISTRATIVO', version:'V.6', estado:'Borrador', fecha:'2025-05-18', cliente:'Metalteco SAS', contacto:'Gina Loaiza', tel:'3177009935', email:'gina.loaiza@metalteco.com', dir:'Km 6 vía Girón', suc:'Planta Metalteco', nit:'800042867-0', mpio:'Girón', pago:'Crédito', validez:15, obs:'Texto de material de prueba', aprobado:'NO', oc:'', facturado:'NO', nfact:'', items:[
-      {desc:'JUEGO DE ACCESORIOS PARA BAÑO', cant:34, precio:679000},
-      {desc:'ESTO ES OTRA PRUEBA PARA VALIDAR LA MANERA EN QUE LA MACRO PROCESA LOS ITEMS CON ALTA CANTIDAD DE TEXTO EN EL CAMPO DESCRIPCIÓN', cant:2, precio:43000},
-      {desc:'VIAJES DE ARENA', cant:3, precio:356000},
-      {desc:'CEMENTO', cant:16, precio:56000},
-      {desc:'CONTROLADORES ELECTRÓNICOS', cant:21, precio:23000},
-      {desc:'ESTA ES UNA PRUEBA PARA VALIDAR CUANDO SE INGRESAN TEXTOS EXTENSOS QUE SOBREPASAN EL TAMAÑO NATURAL DE LAS CELDAS', cant:12, precio:230000}
-    ]},
-    { num:'COT-JMA-0005', titulo:'MANTENIMIENTO SISTEMA DE AGUAS RESIDUALES', version:'V.3', estado:'Borrador', fecha:'2025-05-18', cliente:'Metalteco SAS', contacto:'Federico Parra', tel:'3567896532', email:'federico.parra@metalteco.com', dir:'Km 6 vía Girón', suc:'Planta Metalteco', nit:'800042867-0', mpio:'Girón', pago:'Crédito', validez:15, obs:'El sistema incluye la entrega en el sitio de trabajo', aprobado:'NO', oc:'', facturado:'NO', nfact:'', items:[
-      {desc:'CEMENTO GRIS', cant:56, precio:28000},
-      {desc:'SISTEMA DE DRENAJE PARA PLANTA DE TRATAMIENTO DE AGUAS RESIDUALES CON CAPACIDAD PARA 23 LITROS POR DÍA, INCLUYE ACCESORIOS', cant:12, precio:87000}
-    ]},
-    { num:'COT-JMA-0006', titulo:'MANTENIMIENTO TIENDA DIAGONAL 15', version:'V.1', estado:'Borrador', fecha:'2025-05-18', cliente:'Alfagres S.A.', contacto:'Leonardo Fabio Guarín', tel:'3188007335', email:'leonardo.guarin@alfa.com.co', dir:'Diagonal 15 58-08', suc:'Tienda Diagonal 15', nit:'860032550-7', mpio:'Bucaramanga', pago:'Crédito', validez:15, obs:'Texto de material de prueba', aprobado:'NO', oc:'', facturado:'NO', nfact:'', items:[
-      {desc:'TEJAS PARA BODEGA', cant:45, precio:23000},
-      {desc:'VIAJES DE ARENA', cant:3, precio:356000},
-      {desc:'CEMENTO', cant:16, precio:56000},
-      {desc:'CONTROLADORES ELECTRÓNICOS', cant:21, precio:23000}
-    ]}
-  ];
-
-  const clientes = [
-    {nombre:'Metalteco SAS', contacto:'Gina Loaiza', tel:'3177009935', email:'gina.loaiza@metalteco.com', dir:'Km 6 vía Girón', suc:'Planta Metalteco', nit:'800042867-0', mpio:'Girón'},
-    {nombre:'Alfagres S.A.', contacto:'Diego Vivas', tel:'3188007319', email:'diego.vivas@alfa.com.co', dir:'Calle 5 78a-151', suc:'Tienda Capri', nit:'860032550-7', mpio:'Cali'},
-    {nombre:'Alfagres S.A.', contacto:'Leonardo Fabio Guarín', tel:'3188007335', email:'leonardo.guarin@alfa.com.co', dir:'Diagonal 15 58-08', suc:'Tienda Diagonal 15', nit:'860032550-7', mpio:'Bucaramanga'}
-  ];
-
-  STORE.set('jma_cotizaciones', rawCots);
-  STORE.set('jma_clientes', clientes);
-  STORE.set('jma_seq', 7);
+  STORE.set('jma_cotizaciones', []);
+  STORE.set('jma_clientes', []);
+  STORE.set('jma_seq', 1);
   STORE.set('jma_seeded', true);
 }
 
@@ -5959,30 +5914,26 @@ function restablecerDatos() {
               'jma_contratistas','jma_costos','jma_ejecucion',
               'jma_seq','jma_seeded'];
 
-  // Clear via STORE (handles both localStorage + Firestore sync)
-  STORE.set('jma_cotizaciones', []);
-  STORE.set('jma_clientes', []);
-  STORE.set('jma_materiales', []);
-  STORE.set('jma_contratistas', []);
-  STORE.set('jma_costos', {});
-  STORE.set('jma_ejecucion', {});
-  localStorage.removeItem('jma_seq');
-  localStorage.removeItem('jma_seeded');
+  // 1. Clear localStorage completely
+  localStorage.clear();
 
-  // Also remove from Firestore directly if available
-  if (window._fb) {
-    try {
-      var db = window._fb.db;
-      var docFn = window._fb.doc;
-      var delFn = window._fb.deleteDoc;
-      KEYS.forEach(function(k) {
-        delFn(docFn(db, 'jma_data', k)).catch(function(){});
-      });
-    } catch(e) {}
+  // 2. Delete from Firestore if connected
+  if (window._fb && window._fb.db) {
+    snack('Borrando datos...');
+    var db   = window._fb.db;
+    var docF = window._fb.doc;
+    var delF = window._fb.deleteDoc;
+    var promises = KEYS.map(function(k) {
+      return delF(docF(db, 'jma_data', k)).catch(function(){});
+    });
+    Promise.all(promises).then(function() {
+      snack('Datos eliminados. Recargando...');
+      setTimeout(function() { location.reload(); }, 1000);
+    });
+  } else {
+    snack('Datos locales eliminados. Recargando...');
+    setTimeout(function() { location.reload(); }, 1000);
   }
-
-  snack('Datos eliminados. Recargando...');
-  setTimeout(function() { location.reload(); }, 1500);
 }
 
 function init() {
