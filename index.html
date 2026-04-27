@@ -934,6 +934,36 @@
   .flex-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .ml-auto { margin-left: auto; }
   .hidden { display: none !important; }
+
+/* ── Catalog autocomplete ── */
+.cat-wrap { position:relative; }
+.cat-dropdown {
+  position:absolute; top:100%; left:0; right:0; z-index:9000;
+  background:#fff; border:1.5px solid var(--primary);
+  border-radius:0 0 8px 8px; max-height:220px; overflow-y:auto;
+  box-shadow:0 6px 20px rgba(15,45,94,.15); display:none;
+}
+.cat-dropdown.open { display:block; }
+.cat-item {
+  padding:7px 12px; cursor:pointer; font-size:12px;
+  border-bottom:1px solid var(--gray-100);
+  display:flex; align-items:center; gap:8px;
+}
+.cat-item:hover, .cat-item.active { background:var(--primary-light); }
+.cat-item .cat-esp {
+  font-size:10px; background:var(--primary); color:#fff;
+  border-radius:4px; padding:1px 5px; white-space:nowrap; flex-shrink:0;
+}
+.cat-item .cat-name { flex:1; font-weight:500; color:var(--primary); }
+.cat-note-wrap { margin-top:3px; }
+.cat-note-input {
+  width:100%; font-size:11px; color:var(--gray-600);
+  border:none; border-top:1px dashed var(--gray-200);
+  padding:3px 6px; outline:none; background:#fafafa;
+  border-radius:0 0 6px 6px;
+}
+.cat-note-input::placeholder { color:var(--gray-400); font-style:italic; }
+
 </style>
 
   <!-- ══ FIREBASE SDK ══ -->
@@ -962,6 +992,7 @@
 
     // ── Expose to global scope so legacy JS can call them ──
     window._fb = { app, db, auth, collection, doc, getDocs, setDoc, deleteDoc, onSnapshot, signInWithEmailAndPassword, onAuthStateChanged, signOut };
+    window._firebaseReady = true;
 
     // ── Auth state watcher ──
     onAuthStateChanged(auth, user => {
@@ -976,6 +1007,38 @@
         document.getElementById('app-shell')?.classList.add('hidden');
       }
     });
+  </script>
+
+  <!-- Fallback: if Firebase module fails to load (file:// or no internet), run app with localStorage only -->
+  <script>
+    // If opened as file://, Firebase ES modules won't load due to CORS — start immediately
+    if (window.location.protocol === 'file:') {
+      window.addEventListener('DOMContentLoaded', function() {
+        window._fbUser = { email: 'local@jma.co' };
+        window._fbLoaded = true;
+        document.getElementById('login-screen')?.classList.add('hidden');
+        document.getElementById('app-shell')?.classList.remove('hidden');
+        var emailEl = document.getElementById('topbar-user-email');
+        if (emailEl) emailEl.textContent = '(modo local)';
+        init();
+      });
+    } else {
+      // Online: give Firebase 4s to load, then fallback
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          if (!window._firebaseReady && !window._fbLoaded) {
+            console.warn('Firebase no cargo — modo offline');
+            window._fbUser = { email: 'local@jma.co' };
+            window._fbLoaded = true;
+            document.getElementById('login-screen')?.classList.add('hidden');
+            document.getElementById('app-shell')?.classList.remove('hidden');
+            var emailEl = document.getElementById('topbar-user-email');
+            if (emailEl) emailEl.textContent = '(sin conexion)';
+            init();
+          }
+        }, 4000);
+      });
+    }
   </script>
 </head>
 <body>
@@ -1301,6 +1364,7 @@
       </div>
       <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap">
         <button class="btn btn-outline btn-sm" onclick="addItem()" style="flex:1; justify-content:center">+ Agregar Ítem</button>
+        <button class="btn btn-outline btn-sm" onclick="catGuardarActividad()" style="font-size:11px; color:var(--primary)" title="Guardar actividades nuevas en el catálogo">📋 Guardar en catálogo</button>
       </div>
 
       <div class="totals-box" id="totals-box">
@@ -3057,9 +3121,28 @@ function addItemRow(it) {
   const tbody = document.getElementById('items-tbody');
   const tr = document.createElement('tr');
   tr.id = 'item-row-' + idx;
+  const descVal = escHtml(it.desc||'');
+  const noteVal = escHtml(it.nota||'');
   tr.innerHTML = `
     <td style="color:var(--gray-400); font-size:12px; min-width:24px">${idx}</td>
-    <td><input type="text" class="desc-input" placeholder="Descripción del ítem" value="${escHtml(it.desc||'')}" onchange="recalcTotals()"></td>
+    <td style="min-width:220px">
+      <div class="cat-wrap" id="cat-wrap-${idx}">
+        <input type="text" class="desc-input" id="desc-${idx}"
+          placeholder="Descripción del ítem (mayúsculas)"
+          value="${descVal}"
+          autocomplete="off"
+          style="text-transform:uppercase"
+          oninput="catSearch(${idx})"
+          onkeydown="catKey(event,${idx})"
+          onblur="catBlur(${idx})"
+          onchange="recalcTotals()">
+        <div class="cat-dropdown" id="cat-drop-${idx}"></div>
+        <input type="text" class="cat-note-input" id="note-${idx}"
+          placeholder="Nota o detalle adicional (opcional)"
+          value="${noteVal}"
+          onchange="recalcTotals()">
+      </div>
+    </td>
     <td><input type="number" style="width:70px" placeholder="0" value="${it.cant||''}" min="0" step="any" onchange="calcRow(${idx})" oninput="calcRow(${idx})"></td>
     <td><input type="number" style="width:110px" placeholder="0" value="${it.precio||''}" min="0" step="any" onchange="calcRow(${idx})" oninput="calcRow(${idx})"></td>
     <td class="total-cell" id="row-total-${idx}">${fmt((it.cant||0)*(it.precio||0))}</td>
@@ -3067,6 +3150,126 @@ function addItemRow(it) {
   `;
   tbody.appendChild(tr);
   recalcTotals();
+}
+
+// ── Catalog search logic ──
+let _catIdx = {}; // active highlight index per row
+
+function catSearch(idx) {
+  const input = document.getElementById('desc-' + idx);
+  const drop  = document.getElementById('cat-drop-' + idx);
+  if (!input || !drop) return;
+  const q = input.value.trim().toUpperCase();
+  _catIdx[idx] = -1;
+
+  if (q.length < 2) { drop.classList.remove('open'); drop.innerHTML = ''; return; }
+
+  const hits = CATALOGO_ACTIVIDADES.filter(function(a) {
+    return a.n.toUpperCase().indexOf(q) >= 0 || a.e.toUpperCase().indexOf(q) >= 0;
+  }).slice(0, 12);
+
+  if (!hits.length) { drop.classList.remove('open'); drop.innerHTML = ''; return; }
+
+  drop.innerHTML = '';
+  hits.forEach(function(a, i) {
+    var div = document.createElement('div');
+    div.className = 'cat-item';
+    div.dataset.idx = i;
+    div.dataset.name = a.n;
+    div.innerHTML = '<span class="cat-name">' + escHtml(a.n) + '</span><span class="cat-esp">' + escHtml(a.e) + '</span>';
+    (function(rowIdx, name) {
+      div.addEventListener('mousedown', function(e) { e.preventDefault(); catPick(rowIdx, name); });
+      div.addEventListener('mouseover', function() { catHover(rowIdx, i); });
+    })(idx, a.n);
+    drop.appendChild(div);
+  });
+  drop.classList.add('open');
+}
+
+function catHover(rowIdx, i) {
+  _catIdx[rowIdx] = i;
+  var items = document.querySelectorAll('#cat-drop-' + rowIdx + ' .cat-item');
+  items.forEach(function(el, j) { el.classList.toggle('active', j === i); });
+}
+
+function catKey(e, idx) {
+  var drop = document.getElementById('cat-drop-' + idx);
+  if (!drop || !drop.classList.contains('open')) return;
+  var items = drop.querySelectorAll('.cat-item');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _catIdx[idx] = Math.min((_catIdx[idx] || 0) + 1, items.length - 1);
+    items.forEach(function(el, j) { el.classList.toggle('active', j === _catIdx[idx]); });
+    if (items[_catIdx[idx]]) items[_catIdx[idx]].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _catIdx[idx] = Math.max((_catIdx[idx] || 0) - 1, 0);
+    items.forEach(function(el, j) { el.classList.toggle('active', j === _catIdx[idx]); });
+    if (items[_catIdx[idx]]) items[_catIdx[idx]].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter' || e.key === 'Tab') {
+    var cur = _catIdx[idx];
+    if (cur >= 0 && items[cur]) { e.preventDefault(); catPick(idx, items[cur].dataset.name); }
+  } else if (e.key === 'Escape') {
+    drop.classList.remove('open'); drop.innerHTML = '';
+  }
+}
+
+function catPick(idx, name) {
+  var input = document.getElementById('desc-' + idx);
+  var drop  = document.getElementById('cat-drop-' + idx);
+  if (input) input.value = name;
+  if (drop)  { drop.classList.remove('open'); drop.innerHTML = ''; }
+  var note = document.getElementById('note-' + idx);
+  if (note) note.focus();
+  recalcTotals();
+}
+
+function catBlur(idx) {
+  setTimeout(function() {
+    var drop = document.getElementById('cat-drop-' + idx);
+    if (drop) { drop.classList.remove('open'); drop.innerHTML = ''; }
+  }, 200);
+}
+
+// ── Save to catalog: only via explicit button ──
+var VERBOS_CAT = ['INSTALACIÓN','INSTALACION','MANTENIMIENTO','REPARACIÓN','REPARACION',
+  'CAMBIO','DESMONTE','RETIRO','LIMPIEZA','LAVADO','PINTURA','IMPERMEABILIZACIÓN',
+  'IMPERMEABILIZACION','REVISIÓN','REVISION','ADECUACIÓN','ADECUACION','FABRICACIÓN',
+  'FABRICACION','CONSTRUCCIÓN','CONSTRUCCION','DEMOLICIÓN','DEMOLICION','DESTAPE',
+  'TRASLADO','AJUSTE','APLICACIÓN','APLICACION','FRAGUADO','SELLADO','ESTUCO',
+  'RESANE','PULIDO','SOLDADURA','TAPIZADO','ELABORACIÓN','ELABORACION',
+  'REINSTALACIÓN','REINSTALACION','FUNDICIÓN','FUNDICION','PODA','APERTURA',
+  'INSPECCIÓN','INSPECCION','DIAGNÓSTICO','DIAGNOSTICO','CORTE','PERFORACIÓN',
+  'PERFORACION','DESYERBE','REPROGRAMACIÓN','REPROGRAMACION'];
+
+function catValidarActividad(texto) {
+  var t = (texto || '').trim().toUpperCase();
+  if (!t || t.length < 6) return null;
+  var firstWord = t.split(' ')[0];
+  if (VERBOS_CAT.indexOf(firstWord) < 0) return null;
+  if (CATALOGO_ACTIVIDADES.some(function(a) { return a.n === t; })) return null;
+  return t;
+}
+
+function catGuardarActividad() {
+  var candidatos = [];
+  document.querySelectorAll('.desc-input').forEach(function(inp) {
+    var val = catValidarActividad(inp.value);
+    if (val) candidatos.push(val);
+  });
+  if (!candidatos.length) {
+    snack('No hay actividades nuevas para guardar en el catalogo'); return;
+  }
+  var msg = 'Agregar al catalogo de actividades? Solo se guardan frases genericas (verbo + objeto):\n\n';
+  candidatos.forEach(function(c) { msg += '- ' + c + '\n'; });
+  if (!confirm(msg)) return;
+  candidatos.forEach(function(t) {
+    CATALOGO_ACTIVIDADES.push({ n: t, e: 'Mantenimiento general' });
+  });
+  CATALOGO_ACTIVIDADES.sort(function(a, b) { return a.n.localeCompare(b.n); });
+  STORE.set('jma_catalogo', CATALOGO_ACTIVIDADES);
+  snack('Actividad(es) guardada(s) en el catalogo: ' + candidatos.length);
 }
 
 function removeItemRow(idx) {
@@ -3103,11 +3306,16 @@ function getItemsFromDOM() {
   const tbody = document.getElementById('items-tbody');
   const items = [];
   tbody.querySelectorAll('tr').forEach(tr => {
-    const desc = tr.querySelector('input[type=text]')?.value || '';
+    const desc  = (tr.querySelector('.desc-input')?.value || '').trim();
+    const nota  = (tr.querySelector('.cat-note-input')?.value || '').trim();
     const inputs = tr.querySelectorAll('input[type=number]');
-    const cant = parseFloat(inputs[0]?.value) || 0;
+    const cant  = parseFloat(inputs[0]?.value) || 0;
     const precio = parseFloat(inputs[1]?.value) || 0;
-    if (desc || cant || precio) items.push({desc, cant, precio});
+    if (desc || cant || precio) {
+      const item = {desc, cant, precio};
+      if (nota) item.nota = nota;
+      items.push(item);
+    }
   });
   return items;
 }
@@ -3586,7 +3794,7 @@ function buildPreviewHTML(c, t) {
   const itemRows = (c.items||[]).map((it, i) => `
     <tr>
       <td style="color:var(--gray-400); font-size:12px">${i+1}</td>
-      <td>${escHtml(it.desc)}</td>
+      <td>${escHtml(it.desc)}${it.nota ? '<br><span style="font-size:11px;color:var(--gray-500);font-style:italic">'+escHtml(it.nota)+'</span>' : ''}</td>
       <td class="text-right">${it.cant}</td>
       <td class="text-right">${fmt(it.precio)}</td>
       <td class="text-right" style="font-weight:600">${fmt(it.cant * it.precio)}</td>
@@ -4240,11 +4448,13 @@ function cargarComoPlantilla(num) {
 // ══════════════════════════════════════════════════════
 // MÓDULO PRESUPUESTO
 // ══════════════════════════════════════════════════════
+const CATALOGO_ACTIVIDADES = [{"n": "INSTALACIÓN DE AIRE ACONDICIONADO", "e": "Aire acondicionado"}, {"n": "MANTENIMIENTO DE AIRE ACONDICIONADO", "e": "Aire acondicionado"}, {"n": "MANTENIMIENTO DE NEVERA/REFRIGERACIÓN", "e": "Aire acondicionado"}, {"n": "TRASLADO DE AIRE ACONDICIONADO", "e": "Aire acondicionado"}, {"n": "DESMONTE DE MUEBLE", "e": "Carpintería"}, {"n": "FABRICACIÓN DE MUEBLE", "e": "Carpintería"}, {"n": "INSTALACIÓN DE MUEBLE", "e": "Carpintería"}, {"n": "LAVADO DE MUEBLES/SILLAS", "e": "Carpintería"}, {"n": "MANTENIMIENTO DE MUEBLES", "e": "Carpintería"}, {"n": "MANTENIMIENTO SILLA ESCRITORIO", "e": "Carpintería"}, {"n": "CAMBIO PUERTA", "e": "Cerrajería"}, {"n": "DESMONTE DE PUERTA", "e": "Cerrajería"}, {"n": "INSTALACIÓN DE CHAPA/CERRADURA", "e": "Cerrajería"}, {"n": "INSTALACIÓN DE CORTINA ENROLLABLE", "e": "Cerrajería"}, {"n": "INSTALACIÓN DE PORTÓN", "e": "Cerrajería"}, {"n": "INSTALACIÓN DE PUERTA", "e": "Cerrajería"}, {"n": "MANTENIMIENTO DE CORTINA ENROLLABLE", "e": "Cerrajería"}, {"n": "MANTENIMIENTO DE PORTÓN", "e": "Cerrajería"}, {"n": "MANTENIMIENTO DE PUERTA", "e": "Cerrajería"}, {"n": "REPARACIÓN DE PORTÓN", "e": "Cerrajería"}, {"n": "REPARACIÓN DE PUERTA", "e": "Cerrajería"}, {"n": "ADECUACIÓN DE TEJAS", "e": "Cubierta y techo"}, {"n": "CAMBIO DE TEJA DE ETERNIT", "e": "Cubierta y techo"}, {"n": "DESMONTE DE TEJAS", "e": "Cubierta y techo"}, {"n": "IMPERMEABILIZACIÓN DE CUBIERTA", "e": "Cubierta y techo"}, {"n": "INSTALACIÓN DE FLANCHE", "e": "Cubierta y techo"}, {"n": "INSTALACIÓN DE TEJAS", "e": "Cubierta y techo"}, {"n": "LIMPIEZA DE CANALES", "e": "Cubierta y techo"}, {"n": "MANTENIMIENTO DE CUBIERTA", "e": "Cubierta y techo"}, {"n": "REPARACIÓN DE CUBIERTA", "e": "Cubierta y techo"}, {"n": "REPARACIÓN DE TEJAS", "e": "Cubierta y techo"}, {"n": "DESMONTE DE CIELO RASO", "e": "Drywall y cielos"}, {"n": "INSTALACIÓN DE CIELO RASO", "e": "Drywall y cielos"}, {"n": "INSTALACIÓN DE DIVISIONES DRYWALL", "e": "Drywall y cielos"}, {"n": "REPARACIÓN DE CIELO RASO", "e": "Drywall y cielos"}, {"n": "ADECUACIÓN DE CABLEADO", "e": "Electricidad"}, {"n": "CAMBIO DE COMPONENTE ELÉCTRICO", "e": "Electricidad"}, {"n": "CAMBIO DE LÁMPARAS", "e": "Electricidad"}, {"n": "INSTALACIÓN DE ACOMETIDA ELÉCTRICA", "e": "Electricidad"}, {"n": "INSTALACIÓN DE CIRCUITO ELÉCTRICO", "e": "Electricidad"}, {"n": "INSTALACIÓN DE EQUIPO ELÉCTRICO", "e": "Electricidad"}, {"n": "INSTALACIÓN DE LÁMPARAS", "e": "Electricidad"}, {"n": "INSTALACIÓN DE REFLECTORES", "e": "Electricidad"}, {"n": "INSTALACIÓN DE TELEVISOR", "e": "Electricidad"}, {"n": "INSTALACIÓN DE TOMAS ELÉCTRICAS", "e": "Electricidad"}, {"n": "INSTALACIÓN DE TUBOS LED", "e": "Electricidad"}, {"n": "INSTALACIÓN DE VENTILADORES", "e": "Electricidad"}, {"n": "LIMPIEZA DE VENTILADORES", "e": "Electricidad"}, {"n": "MANTENIMIENTO DE RACK DE COMUNICACIONES", "e": "Electricidad"}, {"n": "MANTENIMIENTO ELÉCTRICO", "e": "Electricidad"}, {"n": "MANTENIMIENTO ILUMINACION", "e": "Electricidad"}, {"n": "MANTENIMIENTO UPS", "e": "Electricidad"}, {"n": "REPARACIÓN DE LINEA TELEFÓNICA", "e": "Electricidad"}, {"n": "REPARACIÓN ELÉCTRICA", "e": "Electricidad"}, {"n": "REPROGRAMACIÓN DE TEMPORIZADOR", "e": "Electricidad"}, {"n": "RETIRO DE CABLEADO ELÉCTRICO", "e": "Electricidad"}, {"n": "REVISIÓN DE CIRCUITO ELÉCTRICO", "e": "Electricidad"}, {"n": "REVISIÓN ELÉCTRICA", "e": "Electricidad"}, {"n": "TRASLADO DE PUNTO ELÉCTRICO", "e": "Electricidad"}, {"n": "DESMONTE DE ESTRUCTURA METÁLICA", "e": "Estructuras metálicas"}, {"n": "FABRICACIÓN DE PASAMANOS", "e": "Estructuras metálicas"}, {"n": "INSTALACIÓN DE ESTANTERÍA", "e": "Estructuras metálicas"}, {"n": "INSTALACIÓN DE ESTRUCTURA METÁLICA", "e": "Estructuras metálicas"}, {"n": "INSTALACIÓN DE REJA/MALLA", "e": "Estructuras metálicas"}, {"n": "REPARACIÓN DE ESTRUCTURA", "e": "Estructuras metálicas"}, {"n": "REPARACIÓN DE REJA", "e": "Estructuras metálicas"}, {"n": "AJUSTE DE VÁLVULA", "e": "Fontanería"}, {"n": "CAMBIAR TUBO BAJANTE", "e": "Fontanería"}, {"n": "CAMBIO DE EMPAQUES", "e": "Fontanería"}, {"n": "CAMBIO DE GRIFERÍA", "e": "Fontanería"}, {"n": "CAMBIO DE LAVAMANOS", "e": "Fontanería"}, {"n": "CAMBIO DE LAVAPLATOS", "e": "Fontanería"}, {"n": "CAMBIO DE LLAVE LAVATRAPEROS", "e": "Fontanería"}, {"n": "CAMBIO DE MANGUERAS", "e": "Fontanería"}, {"n": "CAMBIO DE MEZCLADOR", "e": "Fontanería"}, {"n": "CAMBIO DE SIFÓN", "e": "Fontanería"}, {"n": "CAMBIO DE TUBERÍA", "e": "Fontanería"}, {"n": "DESTAPE DE LAVAMANOS", "e": "Fontanería"}, {"n": "DESTAPE DE SIFÓN/DESAGÜE", "e": "Fontanería"}, {"n": "INSTALACIÓN DE DESAGÜE", "e": "Fontanería"}, {"n": "INSTALACIÓN DE GRIFERÍA", "e": "Fontanería"}, {"n": "INSTALACIÓN DE LAVAMANOS", "e": "Fontanería"}, {"n": "INSTALACIÓN DE LAVAPLATOS", "e": "Fontanería"}, {"n": "INSTALACIÓN DE PURIFICADOR DE AGUA", "e": "Fontanería"}, {"n": "INSTALACIÓN DE SANITARIO", "e": "Fontanería"}, {"n": "INSTALACIÓN DE SIFÓN", "e": "Fontanería"}, {"n": "INSTALACIÓN DE TAPA REGISTRO", "e": "Fontanería"}, {"n": "INSTALACIÓN DE TUBERÍA", "e": "Fontanería"}, {"n": "LIMPIEZA DE DESAGÜES", "e": "Fontanería"}, {"n": "MANTENIMIENTO DE CANAL DE AGUAS LLUVIAS", "e": "Fontanería"}, {"n": "REPARACIÓN DE FILTRACIÓN/FUGA", "e": "Fontanería"}, {"n": "REPARACIÓN DE LAVATRAPERO", "e": "Fontanería"}, {"n": "RETIRO DE SANITARIO", "e": "Fontanería"}, {"n": "RETIRO DE SIFÓN", "e": "Fontanería"}, {"n": "REVISIÓN Y DESTAPE DE BAJANTE", "e": "Fontanería"}, {"n": "INSTALACIÓN DE RODAMIENTOS", "e": "Gatos y equipos"}, {"n": "MANTENIMIENTO DE ESTIBADORA", "e": "Gatos y equipos"}, {"n": "MANTENIMIENTO DE MONTACARGA", "e": "Gatos y equipos"}, {"n": "MANTENIMIENTO DE ZONAS VERDES", "e": "Jardinería"}, {"n": "PODA DE ÁRBOLES/JARDÍN", "e": "Jardinería"}, {"n": "ASEO GENERAL", "e": "Mantenimiento general"}, {"n": "CAMBIO DE RODAMIENTOS", "e": "Mantenimiento general"}, {"n": "INSTALACIÓN DE SEÑALIZADORES", "e": "Mantenimiento general"}, {"n": "MANTENIMIENTO DE AVISO", "e": "Mantenimiento general"}, {"n": "RETIRO DE ESCOMBROS", "e": "Mantenimiento general"}, {"n": "TAPIZADO DE SILLAS", "e": "Mantenimiento general"}, {"n": "TRASLADO DE MUEBLES Y EQUIPOS", "e": "Mantenimiento general"}, {"n": "CONSTRUCCIÓN DE COLUMNA", "e": "Obras civiles"}, {"n": "CONSTRUCCIÓN DE MURO", "e": "Obras civiles"}, {"n": "CONSTRUCCIÓN DE VIGA", "e": "Obras civiles"}, {"n": "DEMOLICIÓN DE ESTRUCTURA", "e": "Obras civiles"}, {"n": "FABRICACIÓN DE RAMPA", "e": "Obras civiles"}, {"n": "FUNDICIÓN DE CONCRETO", "e": "Obras civiles"}, {"n": "REPARACIÓN ESTRUCTURAL", "e": "Obras civiles"}, {"n": "ESTUCO DE FACHADA", "e": "Pintura y acabados"}, {"n": "ESTUCO Y PINTURA DE PAREDES", "e": "Pintura y acabados"}, {"n": "IMPERMEABILIZACIÓN DE PAREDES", "e": "Pintura y acabados"}, {"n": "LAVADO DE FACHADA", "e": "Pintura y acabados"}, {"n": "PINTURA DE CIELO RASO", "e": "Pintura y acabados"}, {"n": "PINTURA DE ESTRUCTURA METÁLICA", "e": "Pintura y acabados"}, {"n": "PINTURA DE FACHADA", "e": "Pintura y acabados"}, {"n": "PINTURA DE PAREDES INTERIORES", "e": "Pintura y acabados"}, {"n": "PINTURA DE PISO", "e": "Pintura y acabados"}, {"n": "REPARACIÓN DE FACHADA", "e": "Pintura y acabados"}, {"n": "REPARACIÓN DE PAREDES", "e": "Pintura y acabados"}, {"n": "RESANE DE PAREDES", "e": "Pintura y acabados"}, {"n": "RESANE Y PINTURA", "e": "Pintura y acabados"}, {"n": "DESMONTE DE PISO/ENCHAPE", "e": "Pisos y enchapes"}, {"n": "FRAGUADO DE PISO", "e": "Pisos y enchapes"}, {"n": "INSTALACIÓN DE CINTA ANTIDERAPANTE", "e": "Pisos y enchapes"}, {"n": "INSTALACIÓN DE PISO/ENCHAPE", "e": "Pisos y enchapes"}, {"n": "LAVADO DE PISOS/ALFOMBRAS", "e": "Pisos y enchapes"}, {"n": "PULIDO Y CRISTALIZADO DE PISO", "e": "Pisos y enchapes"}, {"n": "REPARACIÓN DE FISURAS EN PISO", "e": "Pisos y enchapes"}, {"n": "INSTALACIÓN DE CABLEADO DE RED", "e": "Redes y datos"}, {"n": "INSTALACIÓN PUNTO DE RED", "e": "Redes y datos"}, {"n": "CAMBIO DE ESPEJO", "e": "Vidrios"}, {"n": "CAMBIO DE VIDRIOS", "e": "Vidrios"}, {"n": "INSTALACIÓN DE ESPEJO", "e": "Vidrios"}, {"n": "INSTALACIÓN DE PELÍCULA DE SEGURIDAD", "e": "Vidrios"}, {"n": "INSTALACIÓN DE VIDRIOS", "e": "Vidrios"}, {"n": "REPARACIÓN DE VENTANA/VIDRIO", "e": "Vidrios"}];
+
 const ESPECIALIDADES = [
-  'Electricidad básica','Fontanería básica','Pintura y acabados livianos',
-  'Estuco básico','Divisiones en drywall','Carpintería','Cerrajería',
-  'Pisos y enchapes','Mantenimiento de aire acondicionado',
-  'Instalación de cámaras','Cableado de red','Mantenimiento locativo general'
+  'Aire acondicionado','Carpintería','Cerrajería','Cubierta y techo',
+  'Drywall y cielos','Electricidad','Estructuras metálicas','Fontanería',
+  'Gatos y equipos','Jardinería','Mantenimiento general','Obras civiles',
+  'Pintura y acabados','Pisos y enchapes','Redes y datos','Vidrios'
 ];
 const getMateriales   = () => STORE.get('jma_materiales', []);
 const getContratistas = () => STORE.get('jma_contratistas', []);
@@ -5348,7 +5558,7 @@ function generarPDFCotizacion(cotNum) {
     return `
       <tr>
         <td class="it-num">${i+1}</td>
-        <td class="it-desc">${escHtml(it.desc||'')}</td>
+        <td class="it-desc">${escHtml(it.desc||'')}${it.nota ? '<br><span style="font-size:8pt;color:#607D8B;font-style:italic">'+escHtml(it.nota)+'</span>' : ''}</td>
         <td class="it-qty">${it.cant}</td>
         <td class="it-price">$ ${fmtCOP(it.precio||0)}</td>
         <td class="it-total">$ ${fmtCOP(total)}</td>
@@ -5674,6 +5884,15 @@ function logoutFirebase() {
 }
 
 function init() {
+  // Merge stored catalog with built-in
+  const stored = STORE.get('jma_catalogo', []);
+  stored.forEach(a => {
+    if (!CATALOGO_ACTIVIDADES.some(x => x.n === a.n)) {
+      CATALOGO_ACTIVIDADES.push(a);
+    }
+  });
+  CATALOGO_ACTIVIDADES.sort((a,b) => a.n.localeCompare(b.n));
+
   // Load fresh data from Firebase, then seed if needed
   STORE.loadFromFirebase().then(() => {
     seedData();
