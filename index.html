@@ -275,6 +275,7 @@
     border-collapse: collapse;
     margin-top: 8px;
     font-size: 13px;
+    table-layout: fixed;
   }
   .items-table th {
     background: var(--navy);
@@ -286,22 +287,28 @@
     letter-spacing: 0.5px;
     text-transform: uppercase;
   }
-  .items-table th:first-child { border-radius: 6px 0 0 0; }
-  .items-table th:last-child { border-radius: 0 6px 0 0; }
+  .items-table th:nth-child(1) { width: 32px; border-radius: 6px 0 0 0; }
+  .items-table th:nth-child(2) { width: auto; }
+  .items-table th:nth-child(3) { width: 72px; }
+  .items-table th:nth-child(4) { width: 110px; }
+  .items-table th:nth-child(5) { width: 90px; }
+  .items-table th:nth-child(6) { width: 44px; border-radius: 0 6px 0 0; }
   .items-table td {
-    padding: 8px 10px;
+    padding: 6px 8px;
     border-bottom: 1px solid var(--gray-200);
-    vertical-align: middle;
+    vertical-align: top;
+    overflow: visible;
   }
   .items-table tr:hover td { background: var(--cream); }
   .items-table input {
     padding: 6px 8px;
     font-size: 13px;
     border-radius: 6px;
-    min-width: 60px;
+    width: 100%;
+    box-sizing: border-box;
   }
-  .items-table .desc-input { min-width: 160px; }
-  .total-cell { font-weight: 600; color: var(--navy); white-space: nowrap; }
+  .items-table .desc-input { width: 100%; }
+  .total-cell { font-weight: 600; color: var(--navy); white-space: nowrap; padding-top: 10px !important; }
 
   /* ── TOTALS BOX ── */
   .totals-box {
@@ -755,7 +762,7 @@
     .items-table { font-size: 12px; }
     .items-table td, .items-table th { padding: 7px 6px; }
     .items-table input { font-size: 12px; padding: 5px 6px; }
-    .items-table .desc-input { min-width: 140px; }
+    .items-table .desc-input { min-width: 140px; width: 100%; }
 
     /* Totals */
     .totals-box { padding: 12px 14px; }
@@ -1319,21 +1326,17 @@
           <label>Teléfono</label>
           <input type="text" id="cli-tel" placeholder="3XXXXXXXXX">
         </div>
-        <div class="form-group span2">
+        <div class="form-group">
           <label>Email</label>
           <input type="email" id="cli-email" placeholder="correo@empresa.com">
-        </div>
-        <div class="form-group span2">
-          <label>Dirección</label>
-          <input type="text" id="cli-dir" placeholder="Dirección completa">
-        </div>
-        <div class="form-group">
-          <label>Sucursal / Sede</label>
-          <input type="text" id="cli-suc" placeholder="Nombre de la sede">
         </div>
         <div class="form-group">
           <label>NIT / Cédula</label>
           <input type="text" id="cli-nit" placeholder="XXXXXXXXX-X">
+        </div>
+        <div class="form-group">
+          <label>Sucursal / Sede</label>
+          <input type="text" id="cli-suc" placeholder="Nombre de la sede">
         </div>
         <div class="form-group">
           <label>Municipio</label>
@@ -1341,12 +1344,16 @@
             <option value="">Seleccione municipio...</option>
           </select>
         </div>
+        <div class="form-group span2">
+          <label>Dirección</label>
+          <input type="text" id="cli-dir" placeholder="Dirección completa">
+        </div>
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" style="overflow:visible">
       <div class="card-title">📦 Ítems de la Cotización</div>
-      <div style="overflow-x:auto">
+      <div style="overflow-x:auto; overflow-y:visible">
         <table class="items-table">
           <thead>
             <tr>
@@ -3109,8 +3116,14 @@ function renderItems(items) {
   const tbody = document.getElementById('items-tbody');
   tbody.innerHTML = '';
   itemCounter = 0;
-  if (!items.length) { addItem(); return; }
+  if (!items.length) {
+    // Show 5 empty rows by default
+    for (let i = 0; i < 5; i++) addItemRow({});
+    return;
+  }
   items.forEach(it => addItemRow(it));
+  // Pad to at least 5 rows
+  while (itemCounter < 5) addItemRow({});
 }
 
 function addItem() { addItemRow({}); }
