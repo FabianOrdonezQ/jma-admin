@@ -1091,6 +1091,7 @@
   <div class="topbar-date" id="topbarDate"></div>
   <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
     <span id="topbar-user-email" style="font-size:11px;color:rgba(255,255,255,0.6);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+    <button onclick="restablecerDatos()" style="background:rgba(220,50,50,0.25);border:1px solid rgba(255,100,100,0.4);color:#ffaaaa;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer" title="Borrar todos los datos y empezar en blanco">🗑️ Restablecer</button>
     <button onclick="logoutFirebase()" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer" title="Cerrar sesión">⎋ Salir</button>
   </div>
 </div>
@@ -5908,6 +5909,42 @@ function loginFirebase() {
 function logoutFirebase() {
   if (!confirm('¿Cerrar sesión?')) return;
   window._fb.signOut(window._fb.auth);
+}
+
+async function restablecerDatos() {
+  const confirmMsg =
+    '⚠️ RESTABLECER DATOS\n\n' +
+    'Esta acción eliminará PERMANENTEMENTE:\n' +
+    '• Todas las cotizaciones\n' +
+    '• Todos los clientes\n' +
+    '• Materiales, contratistas y costos\n' +
+    '• Datos de ejecución\n\n' +
+    'El catálogo de actividades se conserva.\n\n' +
+    '¿Estás seguro? Esta acción NO se puede deshacer.';
+  if (!confirm(confirmMsg)) return;
+  if (!confirm('Segunda confirmación: ¿eliminar todos los datos?')) return;
+
+  const KEYS = ['jma_cotizaciones','jma_clientes','jma_materiales',
+                'jma_contratistas','jma_costos','jma_ejecucion',
+                'jma_seq','jma_seeded'];
+
+  // Clear localStorage
+  KEYS.forEach(k => localStorage.removeItem(k));
+
+  // Clear Firestore if connected
+  if (window._fb && window._fbUser) {
+    try {
+      const { db, doc, deleteDoc } = window._fb;
+      await Promise.all(KEYS.map(k => deleteDoc(doc(db, 'jma_data', k))));
+      snack('✅ Datos eliminados de Firebase y localStorage');
+    } catch(e) {
+      snack('✅ Datos locales eliminados (Firebase: ' + e.message + ')');
+    }
+  } else {
+    snack('✅ Datos locales eliminados');
+  }
+
+  setTimeout(() => location.reload(), 1200);
 }
 
 function init() {
